@@ -116,6 +116,13 @@ func runTask(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Review before creating if enabled
+	if viper.GetBool("general.review_before_create") && !noCreate {
+		if err := reviewTaskBeforeCreate(task, epicFilePath); err != nil {
+			return fmt.Errorf("review failed: %w", err)
+		}
+	}
+
 	// Add task to epic file
 	if err := addTaskToEpicFile(parser, epicFilePath, task); err != nil {
 		return fmt.Errorf("failed to add task to epic file: %w", err)
@@ -130,6 +137,16 @@ func runTask(cmd *cobra.Command, args []string) error {
 			fmt.Printf("Warning: Failed to create Jira ticket: %v\n", err)
 		} else {
 			fmt.Printf("Jira ticket created: %s\n", task.Key)
+
+			// Update the epic file with the real Jira key and rename if needed
+			if err := updateTaskWithJiraKey(parser, epicFilePath, task); err != nil {
+				fmt.Printf("Warning: Failed to update task with Jira key: %v\n", err)
+			}
+		}
+	} else {
+		// Even if not creating Jira ticket, rename the file to the correct format
+		if err := renameTaskFile(epicFilePath, task); err != nil {
+			fmt.Printf("Warning: Failed to rename task file: %v\n", err)
 		}
 	}
 
@@ -155,9 +172,8 @@ func openEditorForTask() (string, error) {
 	defer os.Remove(tmpFile.Name())
 
 	// Write template to temp file
-	template := `# New Task
-
-Describe your task here. Be specific about what needs to be done, why it's important, and any relevant context.
+	template := `## Overview
+Brief description of what this task aims to achieve.
 
 ## Acceptance Criteria
 - [ ] Criterion 1
@@ -208,6 +224,8 @@ func extractTitleFromContent(content string) string {
 
 // enrichTask enriches a task using AI
 func enrichTask(task *types.Ticket, ctx *types.Context) (*types.EnrichmentResponse, error) {
+	fmt.Printf("Starting AI enrichment for task: %s\n", task.Title)
+
 	// Get AI config
 	aiConfig := &types.Config{
 		AI: struct {
@@ -223,18 +241,25 @@ func enrichTask(task *types.Ticket, ctx *types.Context) (*types.EnrichmentRespon
 		},
 	}
 
+	fmt.Printf("AI Config - Provider: %s, Model: %s, MaxTokens: %d\n",
+		aiConfig.AI.Provider, aiConfig.AI.Model, aiConfig.AI.MaxTokens)
+
 	if aiConfig.AI.APIKey == "" {
+		fmt.Println("ERROR: No AI API key configured (JAI_AI_TOKEN environment variable not set)")
 		return nil, fmt.Errorf("no AI API key configured (set JAI_AI_TOKEN environment variable)")
 	}
 
 	if aiConfig.AI.Model == "" {
 		aiConfig.AI.Model = "gpt-3.5-turbo" // Default model
+		fmt.Printf("Using default model: %s\n", aiConfig.AI.Model)
 	}
 
 	if aiConfig.AI.MaxTokens == 0 {
 		aiConfig.AI.MaxTokens = 500 // Default max tokens
+		fmt.Printf("Using default max tokens: %d\n", aiConfig.AI.MaxTokens)
 	}
 
+	fmt.Println("Creating AI service...")
 	// Create AI service
 	aiService := ai.NewService(aiConfig)
 
@@ -245,8 +270,21 @@ func enrichTask(task *types.Ticket, ctx *types.Context) (*types.EnrichmentRespon
 		Context:    *ctx,
 	}
 
+	fmt.Printf("Enrichment request - Type: %s, RawContent length: %d, EpicKey: %s, TaskKey: %s\n",
+		req.Type, len(req.RawContent), req.Context.EpicKey, req.Context.TaskKey)
+
+	fmt.Println("Calling AI service to enrich ticket...")
 	// Enrich the task
-	return aiService.EnrichTicket(req)
+	resp, err := aiService.EnrichTicket(req)
+	if err != nil {
+		fmt.Printf("ERROR: AI enrichment failed: %v\n", err)
+		return nil, err
+	}
+
+	fmt.Printf("AI enrichment successful - Title: %s, Description length: %d, Labels: %v, Priority: %s\n",
+		resp.Title, len(resp.Description), resp.Labels, resp.Priority)
+
+	return resp, nil
 }
 
 // addTaskToEpicFile adds a task to the epic markdown file
@@ -305,4 +343,184 @@ func createJiraTicket(task *types.Ticket) error {
 	*task = *createdTicket
 
 	return nil
+}
+
+// reviewTaskBeforeCreate opens the epic file for review and asks for confirmation
+func reviewTaskBeforeCreate(task *types.Ticket, epicFilePath string) error {
+	// Get editor from config or environment
+	editor := viper.GetString("general.default_editor")
+	if editor == "" {
+		editor = os.Getenv("EDITOR")
+		if editor == "" {
+			editor = "vim" // Default fallback
+		}
+	}
+
+	// Create a temporary file with the current content
+	tmpFile, err := os.CreateTemp("", "jai-review-*.md")
+	if err != nil {
+		return fmt.Errorf("failed to create temp file: %w", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	// Create review content
+	reviewContent := fmt.Sprintf(`# Review Task Before Creating Jira Ticket
+
+File: %s
+
+## Task Content to be Created:
+%s
+
+---
+Review the task above. The task will be added to the epic file and a Jira ticket will be created.
+Save and exit to proceed, or delete all content to cancel.
+`, epicFilePath, formatTaskForReview(task))
+
+	if _, err := tmpFile.WriteString(reviewContent); err != nil {
+		return fmt.Errorf("failed to write review content: %w", err)
+	}
+	tmpFile.Close()
+
+	// Open editor for review
+	cmd := exec.Command(editor, tmpFile.Name())
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to run editor: %w", err)
+	}
+
+	// Read content back
+	content, err := os.ReadFile(tmpFile.Name())
+	if err != nil {
+		return fmt.Errorf("failed to read temp file: %w", err)
+	}
+
+	// Check if user cancelled (deleted all content)
+	if strings.TrimSpace(string(content)) == "" {
+		return fmt.Errorf("task creation cancelled by user")
+	}
+
+	// Ask for final confirmation
+	fmt.Print("Proceed with creating Jira ticket? (y/n): ")
+	var response string
+	fmt.Scanln(&response)
+
+	if strings.ToLower(strings.TrimSpace(response)) != "y" && strings.ToLower(strings.TrimSpace(response)) != "yes" {
+		return fmt.Errorf("task creation cancelled by user")
+	}
+
+	return nil
+}
+
+// formatTaskForReview formats a task for display in the review
+func formatTaskForReview(task *types.Ticket) string {
+	var parts []string
+
+	parts = append(parts, fmt.Sprintf("### Title\n%s", task.Title))
+
+	if task.Enriched != "" {
+		parts = append(parts, fmt.Sprintf("### Content\n%s", task.Enriched))
+	} else if task.RawContent != "" {
+		parts = append(parts, fmt.Sprintf("### Content\n%s", task.RawContent))
+	}
+
+	return strings.Join(parts, "\n\n")
+}
+
+// updateTaskWithJiraKey updates the task with the Jira key and renames the file
+func updateTaskWithJiraKey(parser *markdown.Parser, epicFilePath string, task *types.Ticket) error {
+	// Parse existing file
+	mdFile, err := parser.ParseFile(epicFilePath)
+	if err != nil {
+		return fmt.Errorf("failed to parse epic file: %w", err)
+	}
+
+	// Find and update the task with the real key
+	for i, t := range mdFile.Tickets {
+		if t.Type == types.TicketTypeTask && t.EpicKey == task.EpicKey && t.Title == task.Title {
+			mdFile.Tickets[i].Key = task.Key
+			break
+		}
+	}
+
+	// Write back to file
+	if err := parser.WriteFile(epicFilePath, mdFile.Tickets); err != nil {
+		return fmt.Errorf("failed to write epic file: %w", err)
+	}
+
+	// Rename the file to the correct format
+	if err := renameTaskFile(epicFilePath, task); err != nil {
+		return fmt.Errorf("failed to rename task file: %w", err)
+	}
+
+	return nil
+}
+
+// renameTaskFile renames the task file to the correct SRE-####-{ticket title} format
+func renameTaskFile(currentPath string, task *types.Ticket) error {
+	// Create the new filename in the correct format
+	// Convert title to filename-safe format
+	safeTitle := strings.ReplaceAll(task.Title, " ", "-")
+	safeTitle = strings.ReplaceAll(safeTitle, "/", "-")
+	safeTitle = strings.ReplaceAll(safeTitle, "\\", "-")
+	safeTitle = strings.ReplaceAll(safeTitle, ":", "-")
+	safeTitle = strings.ReplaceAll(safeTitle, "*", "-")
+	safeTitle = strings.ReplaceAll(safeTitle, "?", "-")
+	safeTitle = strings.ReplaceAll(safeTitle, "\"", "-")
+	safeTitle = strings.ReplaceAll(safeTitle, "<", "-")
+	safeTitle = strings.ReplaceAll(safeTitle, ">", "-")
+	safeTitle = strings.ReplaceAll(safeTitle, "|", "-")
+
+	// Remove any double dashes and trim
+	safeTitle = strings.ReplaceAll(safeTitle, "--", "-")
+	safeTitle = strings.Trim(safeTitle, "-")
+
+	// Use task key if available, otherwise generate one
+	taskKey := task.Key
+	if taskKey == "" {
+		taskKey = generateTaskKey(task.Title)
+	}
+
+	newFilename := fmt.Sprintf("%s-%s.md", taskKey, safeTitle)
+
+	// Get the directory of the current file
+	dir := filepath.Dir(currentPath)
+	newPath := filepath.Join(dir, newFilename)
+
+	// Check if the new file already exists
+	if _, err := os.Stat(newPath); err == nil {
+		return fmt.Errorf("task file already exists: %s", newPath)
+	}
+
+	// Rename the file
+	if err := os.Rename(currentPath, newPath); err != nil {
+		return fmt.Errorf("failed to rename task file from %s to %s: %w", currentPath, newPath, err)
+	}
+
+	fmt.Printf("Task file renamed to: %s\n", newFilename)
+	return nil
+}
+
+// generateTaskKey generates a Jira-style key for a task
+func generateTaskKey(title string) string {
+	// Extract project prefix from config or use default
+	project := viper.GetString("jira.project")
+	if project == "" {
+		project = "SRE" // Default to SRE for now
+	}
+
+	// Generate a simple key based on title
+	words := strings.Fields(title)
+	if len(words) > 0 {
+		// Use first word as part of the key
+		key := strings.ToUpper(words[0])
+		if len(key) > 3 {
+			key = key[:3]
+		}
+		return fmt.Sprintf("%s-%d", key, time.Now().Unix()%10000)
+	}
+
+	return fmt.Sprintf("%s-%d", project, time.Now().Unix()%10000)
 }

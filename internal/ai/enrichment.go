@@ -72,7 +72,10 @@ func NewOpenAIProvider(config *types.Config) *OpenAIProvider {
 
 // Enrich implements the Provider interface for OpenAI
 func (p *OpenAIProvider) Enrich(req *types.EnrichmentRequest) (*types.EnrichmentResponse, error) {
+	fmt.Printf("OpenAI: Starting enrichment with model %s\n", p.config.AI.Model)
+
 	prompt := p.buildPrompt(req)
+	fmt.Printf("OpenAI: Built prompt (length: %d characters)\n", len(prompt))
 
 	resp, err := p.client.CreateChatCompletion(
 		context.Background(),
@@ -94,15 +97,47 @@ func (p *OpenAIProvider) Enrich(req *types.EnrichmentRequest) (*types.Enrichment
 	)
 
 	if err != nil {
+		fmt.Printf("OpenAI: Request failed: %v\n", err)
+
+		// Provide more specific error messages based on the error type
+		errStr := err.Error()
+		if strings.Contains(errStr, "429") {
+			if strings.Contains(errStr, "quota") || strings.Contains(errStr, "billing") {
+				return nil, fmt.Errorf("OpenAI quota exceeded - please check your billing and usage limits: %w", err)
+			} else if strings.Contains(errStr, "rate limit") {
+				return nil, fmt.Errorf("OpenAI rate limit exceeded - too many requests, please wait and try again: %w", err)
+			} else {
+				return nil, fmt.Errorf("OpenAI 429 error - please check your account status and billing: %w", err)
+			}
+		} else if strings.Contains(errStr, "401") {
+			return nil, fmt.Errorf("OpenAI authentication failed - please check your API key: %w", err)
+		} else if strings.Contains(errStr, "403") {
+			return nil, fmt.Errorf("OpenAI access forbidden - please check your account permissions: %w", err)
+		}
+
 		return nil, fmt.Errorf("failed to create chat completion: %w", err)
 	}
 
+	fmt.Printf("OpenAI: Request successful\n")
+
 	if len(resp.Choices) == 0 {
+		fmt.Printf("OpenAI: No choices in response\n")
 		return nil, fmt.Errorf("no response from AI service")
 	}
 
 	content := resp.Choices[0].Message.Content
-	return p.parseEnrichmentResponse(content)
+	fmt.Printf("OpenAI: Received response (length: %d characters)\n", len(content))
+	fmt.Printf("OpenAI: Usage - Prompt: %d, Completion: %d, Total: %d\n",
+		resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens)
+
+	parsedResp, err := p.parseEnrichmentResponse(content)
+	if err != nil {
+		fmt.Printf("OpenAI: Failed to parse response: %v\n", err)
+		return nil, err
+	}
+
+	fmt.Printf("OpenAI: Successfully parsed enrichment response\n")
+	return parsedResp, nil
 }
 
 // buildPrompt builds the prompt for AI enrichment

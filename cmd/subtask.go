@@ -51,26 +51,31 @@ func runSubtask(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load context: %w", err)
 	}
 
-	// Check if we have both epic and task context
-	if !ctxManager.HasEpic() {
-		return fmt.Errorf("no epic context set. Use 'jai epic <key|title>' first")
-	}
+	// Check if we have task context (epic context is optional for subtasks)
 	if !ctxManager.HasTask() {
 		return fmt.Errorf("no task context set. Use 'jai focus <task>' first")
 	}
 
 	// Get current context
 	currentCtx := ctxManager.Get()
-	epicKey := currentCtx.EpicKey
 	taskKey := currentCtx.TaskKey
+	epicKey := currentCtx.EpicKey // Optional, may be empty
 
 	// Initialize parser
 	parser := markdown.NewParser(dataDir)
-	epicFilePath := parser.GetEpicFilePath(epicKey)
 
-	// Ensure epic file exists
-	if err := parser.EnsureFileExists(epicFilePath); err != nil {
-		return fmt.Errorf("failed to create epic file: %w", err)
+	// Determine file path - if we have epic context, use epic file, otherwise use task file
+	var filePath string
+	if epicKey != "" {
+		filePath = parser.GetEpicFilePath(epicKey)
+	} else {
+		// Create a task-specific file path
+		filePath = parser.GetTaskFilePath(taskKey)
+	}
+
+	// Ensure file exists
+	if err := parser.EnsureFileExists(filePath); err != nil {
+		return fmt.Errorf("failed to create file: %w", err)
 	}
 
 	// Open editor for subtask drafting
@@ -114,12 +119,24 @@ func runSubtask(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Add subtask to epic file
-	if err := addSubtaskToEpicFile(parser, epicFilePath, subtask); err != nil {
-		return fmt.Errorf("failed to add subtask to epic file: %w", err)
+	// Review before creating if enabled
+	if viper.GetBool("general.review_before_create") && !noCreate {
+		if err := reviewSubtaskBeforeCreate(subtask, filePath); err != nil {
+			return fmt.Errorf("review failed: %w", err)
+		}
 	}
 
-	fmt.Printf("Subtask added to task %s in epic %s\n", taskKey, epicKey)
+	// Add subtask to file
+	if err := addSubtaskToFile(parser, filePath, subtask); err != nil {
+		return fmt.Errorf("failed to add subtask to file: %w", err)
+	}
+
+	// Show success message based on context
+	if epicKey != "" {
+		fmt.Printf("Subtask added to task %s in epic %s\n", taskKey, epicKey)
+	} else {
+		fmt.Printf("Subtask added to task %s\n", taskKey)
+	}
 
 	// Create Jira ticket if enabled
 	if !noCreate {
@@ -153,9 +170,8 @@ func openEditorForSubtask() (string, error) {
 	defer os.Remove(tmpFile.Name())
 
 	// Write template to temp file
-	template := `# New Sub-task
-
-Describe your sub-task here. This should be a smaller, more focused piece of work.
+	template := `## Overview
+Brief description of what this sub-task aims to achieve.
 
 ## Acceptance Criteria
 - [ ] Criterion 1
@@ -188,14 +204,14 @@ Any additional notes or context...
 	return string(content), nil
 }
 
-// addSubtaskToEpicFile adds a subtask to the epic markdown file
-func addSubtaskToEpicFile(parser *markdown.Parser, epicFilePath string, subtask *types.Ticket) error {
+// addSubtaskToFile adds a subtask to the markdown file
+func addSubtaskToFile(parser *markdown.Parser, filePath string, subtask *types.Ticket) error {
 	// Parse existing file
-	mdFile, err := parser.ParseFile(epicFilePath)
+	mdFile, err := parser.ParseFile(filePath)
 	if err != nil {
 		// File might not exist or be empty, start fresh
 		mdFile = &types.MarkdownFile{
-			Path:    epicFilePath,
+			Path:    filePath,
 			Tickets: []types.Ticket{},
 		}
 	}
@@ -204,5 +220,93 @@ func addSubtaskToEpicFile(parser *markdown.Parser, epicFilePath string, subtask 
 	mdFile.Tickets = append(mdFile.Tickets, *subtask)
 
 	// Write back to file
-	return parser.WriteFile(epicFilePath, mdFile.Tickets)
+	return parser.WriteFile(filePath, mdFile.Tickets)
+}
+
+// reviewSubtaskBeforeCreate opens the markdown file for review and asks for confirmation
+func reviewSubtaskBeforeCreate(subtask *types.Ticket, filePath string) error {
+	// Get editor from config or environment
+	editor := viper.GetString("general.default_editor")
+	if editor == "" {
+		editor = os.Getenv("EDITOR")
+		if editor == "" {
+			editor = "vim" // Default fallback
+		}
+	}
+
+	// Create a temporary file with the current content
+	tmpFile, err := os.CreateTemp("", "jai-review-*.md")
+	if err != nil {
+		return fmt.Errorf("failed to create temp file: %w", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	// Create review content
+	reviewContent := fmt.Sprintf(`# Review Subtask Before Creating Jira Ticket
+
+File: %s
+
+## Subtask Content to be Created:
+%s
+
+---
+Review the subtask above. The subtask will be added to the epic file and a Jira ticket will be created.
+Save and exit to proceed, or delete all content to cancel.
+`, filePath, formatSubtaskForReview(subtask))
+
+	if _, err := tmpFile.WriteString(reviewContent); err != nil {
+		return fmt.Errorf("failed to write review content: %w", err)
+	}
+	tmpFile.Close()
+
+	// Open editor for review
+	cmd := exec.Command(editor, tmpFile.Name())
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to run editor: %w", err)
+	}
+
+	// Read content back
+	content, err := os.ReadFile(tmpFile.Name())
+	if err != nil {
+		return fmt.Errorf("failed to read temp file: %w", err)
+	}
+
+	// Check if user cancelled (deleted all content)
+	if strings.TrimSpace(string(content)) == "" {
+		return fmt.Errorf("subtask creation cancelled by user")
+	}
+
+	// Ask for final confirmation
+	fmt.Print("Proceed with creating Jira ticket? (y/n): ")
+	var response string
+	fmt.Scanln(&response)
+
+	if strings.ToLower(strings.TrimSpace(response)) != "y" && strings.ToLower(strings.TrimSpace(response)) != "yes" {
+		return fmt.Errorf("subtask creation cancelled by user")
+	}
+
+	return nil
+}
+
+// formatSubtaskForReview formats a subtask for display in the review
+func formatSubtaskForReview(subtask *types.Ticket) string {
+	var parts []string
+
+	parts = append(parts, fmt.Sprintf("### Title\n%s", subtask.Title))
+
+	if subtask.Enriched != "" {
+		parts = append(parts, fmt.Sprintf("### Content\n%s", subtask.Enriched))
+	} else if subtask.RawContent != "" {
+		parts = append(parts, fmt.Sprintf("### Content\n%s", subtask.RawContent))
+	}
+
+	if subtask.ParentKey != "" {
+		parts = append(parts, fmt.Sprintf("### Parent Task\n%s", subtask.ParentKey))
+	}
+
+	return strings.Join(parts, "\n\n")
 }

@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -124,6 +125,13 @@ func runNew(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create epic file: %w", err)
 	}
 
+	// Review before creating if enabled
+	if viper.GetBool("general.review_before_create") && !noCreate {
+		if err := reviewTicketBeforeCreate(ticket, epicFilePath); err != nil {
+			return fmt.Errorf("review failed: %w", err)
+		}
+	}
+
 	// Add ticket to file
 	if err := addTicketToEpicFile(parser, epicFilePath, ticket); err != nil {
 		return fmt.Errorf("failed to add ticket to epic file: %w", err)
@@ -166,4 +174,111 @@ func addTicketToEpicFile(parser *markdown.Parser, epicFilePath string, ticket *t
 
 	// Write back to file
 	return parser.WriteFile(epicFilePath, mdFile.Tickets)
+}
+
+// reviewTicketBeforeCreate opens the epic file for review and asks for confirmation
+func reviewTicketBeforeCreate(ticket *types.Ticket, epicFilePath string) error {
+	// Get editor from config or environment
+	editor := viper.GetString("general.default_editor")
+	if editor == "" {
+		editor = os.Getenv("EDITOR")
+		if editor == "" {
+			editor = "vim" // Default fallback
+		}
+	}
+
+	// Create a temporary file with the current content
+	tmpFile, err := os.CreateTemp("", "jai-review-*.md")
+	if err != nil {
+		return fmt.Errorf("failed to create temp file: %w", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	// Read current epic file content
+	currentContent, err := os.ReadFile(epicFilePath)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to read epic file: %w", err)
+	}
+
+	// Create review content
+	reviewContent := fmt.Sprintf(`# Review Ticket Before Creating Jira Ticket
+
+Current epic file: %s
+
+## New Ticket to be Added:
+%s
+
+## Current Epic Content:
+%s
+
+---
+Review the ticket above. The ticket will be added to the epic file and a Jira ticket will be created.
+Save and exit to proceed, or delete all content to cancel.
+`, epicFilePath, formatTicketForReview(ticket), string(currentContent))
+
+	if _, err := tmpFile.WriteString(reviewContent); err != nil {
+		return fmt.Errorf("failed to write review content: %w", err)
+	}
+	tmpFile.Close()
+
+	// Open editor for review
+	cmd := exec.Command(editor, tmpFile.Name())
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to run editor: %w", err)
+	}
+
+	// Read content back
+	content, err := os.ReadFile(tmpFile.Name())
+	if err != nil {
+		return fmt.Errorf("failed to read temp file: %w", err)
+	}
+
+	// Check if user cancelled (deleted all content)
+	if strings.TrimSpace(string(content)) == "" {
+		return fmt.Errorf("ticket creation cancelled by user")
+	}
+
+	// Ask for final confirmation
+	fmt.Print("Proceed with creating Jira ticket? (y/n): ")
+	var response string
+	fmt.Scanln(&response)
+
+	if strings.ToLower(strings.TrimSpace(response)) != "y" && strings.ToLower(strings.TrimSpace(response)) != "yes" {
+		return fmt.Errorf("ticket creation cancelled by user")
+	}
+
+	return nil
+}
+
+// formatTicketForReview formats a ticket for display in the review
+func formatTicketForReview(ticket *types.Ticket) string {
+	var parts []string
+
+	parts = append(parts, fmt.Sprintf("**Title:** %s", ticket.Title))
+
+	if ticket.Description != "" {
+		parts = append(parts, fmt.Sprintf("**Description:** %s", ticket.Description))
+	}
+
+	if ticket.RawContent != "" {
+		parts = append(parts, fmt.Sprintf("**Raw Content:** %s", ticket.RawContent))
+	}
+
+	if ticket.ParentKey != "" {
+		parts = append(parts, fmt.Sprintf("**Parent Task:** %s", ticket.ParentKey))
+	}
+
+	if len(ticket.Labels) > 0 {
+		parts = append(parts, fmt.Sprintf("**Labels:** %s", strings.Join(ticket.Labels, ", ")))
+	}
+
+	if ticket.Priority != "" {
+		parts = append(parts, fmt.Sprintf("**Priority:** %s", ticket.Priority))
+	}
+
+	return strings.Join(parts, "\n")
 }

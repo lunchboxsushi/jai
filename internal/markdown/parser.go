@@ -223,6 +223,14 @@ func (p *Parser) GetEpicFilePath(epicKey string) string {
 	return filepath.Join(p.dataDir, "tickets", fmt.Sprintf("%s.md", epicKey))
 }
 
+// GetTaskFilePath returns the file path for a task (when no epic context)
+func (p *Parser) GetTaskFilePath(taskKey string) string {
+	if taskKey == "" {
+		return filepath.Join(p.dataDir, "tickets", "inbox.md")
+	}
+	return filepath.Join(p.dataDir, "tickets", fmt.Sprintf("%s.md", taskKey))
+}
+
 // GetInboxFilePath returns the path to the inbox file
 func (p *Parser) GetInboxFilePath() string {
 	return filepath.Join(p.dataDir, "tickets", "inbox.md")

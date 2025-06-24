@@ -1,9 +1,11 @@
 package cmd
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/lunchboxsushi/jai/internal/context"
@@ -47,10 +49,9 @@ func runFocus(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load context: %w", err)
 	}
 
-	// If no args provided, show current context
+	// If no args provided, show interactive epic/task selection
 	if len(args) == 0 {
-		fmt.Println(ctxManager.String())
-		return nil
+		return interactiveFocus(ctxManager, dataDir)
 	}
 
 	query := args[0]
@@ -62,6 +63,137 @@ func runFocus(cmd *cobra.Command, args []string) error {
 
 	// Try fuzzy matching
 	return focusByFuzzyMatch(ctxManager, dataDir, query)
+}
+
+// interactiveFocus provides a hierarchical selection: epics -> tasks
+func interactiveFocus(ctxManager *context.Manager, dataDir string) error {
+	parser := markdown.NewParser(dataDir)
+	ticketsDir := filepath.Join(dataDir, "tickets")
+
+	// 1. List all epics
+	epics, err := listEpics(parser, ticketsDir)
+	if err != nil {
+		return fmt.Errorf("failed to list epics: %w", err)
+	}
+	if len(epics) == 0 {
+		return fmt.Errorf("no epics found")
+	}
+
+	fmt.Println("Select an epic:")
+	for i, epic := range epics {
+		fmt.Printf("%d. %s [%s]\n", i+1, epic.Title, epic.Key)
+	}
+	fmt.Print("Enter number (or blank to cancel): ")
+	selectedEpicIdx := readNumber(len(epics))
+	if selectedEpicIdx == -1 {
+		fmt.Println("Cancelled.")
+		return nil
+	}
+	epic := epics[selectedEpicIdx]
+	if err := ctxManager.SetEpic(epic.Key, epic.ID); err != nil {
+		return fmt.Errorf("failed to set epic context: %w", err)
+	}
+	fmt.Printf("Focused on epic: %s [%s]\n", epic.Title, epic.Key)
+
+	// 2. List tasks under the selected epic
+	tasks, err := listTasksForEpic(parser, ticketsDir, epic.Key)
+	if err != nil {
+		return fmt.Errorf("failed to list tasks: %w", err)
+	}
+	if len(tasks) == 0 {
+		fmt.Println("No tasks found under this epic.")
+		return nil
+	}
+
+	fmt.Println("Select a task:")
+	for i, task := range tasks {
+		fmt.Printf("%d. %s [%s]\n", i+1, task.Title, task.Key)
+	}
+	fmt.Print("Enter number (or blank to stay on epic): ")
+	selectedTaskIdx := readNumber(len(tasks))
+	if selectedTaskIdx == -1 {
+		fmt.Println("Staying focused on epic.")
+		return nil
+	}
+	task := tasks[selectedTaskIdx]
+	if err := ctxManager.SetTask(task.Key, task.ID); err != nil {
+		return fmt.Errorf("failed to set task context: %w", err)
+	}
+	fmt.Printf("Focused on task: %s [%s]\n", task.Title, task.Key)
+	return nil
+}
+
+// listEpics returns all epics from all markdown files
+func listEpics(parser *markdown.Parser, ticketsDir string) ([]types.Ticket, error) {
+	var epics []types.Ticket
+	files, err := os.ReadDir(ticketsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return epics, nil
+		}
+		return nil, err
+	}
+	for _, file := range files {
+		if file.IsDir() || !isMarkdownFile(file.Name()) {
+			continue
+		}
+		filePath := filepath.Join(ticketsDir, file.Name())
+		mdFile, err := parser.ParseFile(filePath)
+		if err != nil {
+			continue
+		}
+		for _, ticket := range mdFile.Tickets {
+			if ticket.Type == types.TicketTypeEpic {
+				epics = append(epics, ticket)
+			}
+		}
+	}
+	return epics, nil
+}
+
+// listTasksForEpic returns all tasks for a given epic key
+func listTasksForEpic(parser *markdown.Parser, ticketsDir string, epicKey string) ([]types.Ticket, error) {
+	var tasks []types.Ticket
+	files, err := os.ReadDir(ticketsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return tasks, nil
+		}
+		return nil, err
+	}
+	for _, file := range files {
+		if file.IsDir() || !isMarkdownFile(file.Name()) {
+			continue
+		}
+		filePath := filepath.Join(ticketsDir, file.Name())
+		mdFile, err := parser.ParseFile(filePath)
+		if err != nil {
+			continue
+		}
+		for _, ticket := range mdFile.Tickets {
+			if ticket.Type == types.TicketTypeTask && ticket.EpicKey == epicKey {
+				tasks = append(tasks, ticket)
+			}
+		}
+	}
+	return tasks, nil
+}
+
+// readNumber reads a number from stdin, returns -1 if blank/cancel
+func readNumber(max int) int {
+	scanner := bufio.NewScanner(os.Stdin)
+	scanner.Scan()
+	input := strings.TrimSpace(scanner.Text())
+	if input == "" {
+		return -1
+	}
+	var n int
+	_, err := fmt.Sscanf(input, "%d", &n)
+	if err != nil || n < 1 || n > max {
+		fmt.Println("Invalid selection.")
+		return -1
+	}
+	return n - 1
 }
 
 // focusByKey focuses on a specific ticket by key
@@ -169,4 +301,16 @@ func setTicketContext(ctxManager *context.Manager, ticket types.Ticket) error {
 	}
 
 	return nil
+}
+
+// isJiraKey checks if a string looks like a Jira key
+func isJiraKey(s string) bool {
+	// Simple regex for PROJECT-123 format
+	re := regexp.MustCompile(`^[A-Z]+-\d+$`)
+	return re.MatchString(s)
+}
+
+// isMarkdownFile checks if a file is a markdown file
+func isMarkdownFile(filename string) bool {
+	return strings.HasSuffix(filename, ".md")
 }
