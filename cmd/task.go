@@ -118,17 +118,18 @@ func runTask(cmd *cobra.Command, args []string) error {
 
 	// Review before creating if enabled
 	if viper.GetBool("general.review_before_create") && !noCreate {
-		if err := reviewTaskBeforeCreate(task, epicFilePath); err != nil {
+		if err := reviewTaskBeforeCreate(task, parser.GetTaskFilePath("")); err != nil {
 			return fmt.Errorf("review failed: %w", err)
 		}
 	}
 
-	// Add task to epic file
-	if err := addTaskToEpicFile(parser, epicFilePath, task); err != nil {
-		return fmt.Errorf("failed to add task to epic file: %w", err)
+	// Create separate task file instead of adding to epic
+	taskFilePath := parser.GetTaskFilePath("") // Will be renamed after Jira creation
+	if err := createTaskFile(parser, taskFilePath, task); err != nil {
+		return fmt.Errorf("failed to create task file: %w", err)
 	}
 
-	fmt.Printf("Task added to epic %s\n", epicKey)
+	fmt.Printf("Task created in separate file\n")
 
 	// Create Jira ticket if enabled
 	if !noCreate {
@@ -138,14 +139,14 @@ func runTask(cmd *cobra.Command, args []string) error {
 		} else {
 			fmt.Printf("Jira ticket created: %s\n", task.Key)
 
-			// Update the epic file with the real Jira key and rename if needed
-			if err := updateTaskWithJiraKey(parser, epicFilePath, task); err != nil {
+			// Update the task file with the real Jira key and rename if needed
+			if err := updateTaskWithJiraKey(parser, taskFilePath, task); err != nil {
 				fmt.Printf("Warning: Failed to update task with Jira key: %v\n", err)
 			}
 		}
 	} else {
 		// Even if not creating Jira ticket, rename the file to the correct format
-		if err := renameTaskFile(epicFilePath, task); err != nil {
+		if err := renameTaskFile(taskFilePath, task); err != nil {
 			fmt.Printf("Warning: Failed to rename task file: %v\n", err)
 		}
 	}
@@ -287,23 +288,68 @@ func enrichTask(task *types.Ticket, ctx *types.Context) (*types.EnrichmentRespon
 	return resp, nil
 }
 
-// addTaskToEpicFile adds a task to the epic markdown file
-func addTaskToEpicFile(parser *markdown.Parser, epicFilePath string, task *types.Ticket) error {
-	// Parse existing file
-	mdFile, err := parser.ParseFile(epicFilePath)
-	if err != nil {
-		// File might not exist or be empty, start fresh
-		mdFile = &types.MarkdownFile{
-			Path:    epicFilePath,
-			Tickets: []types.Ticket{},
+// createTaskFile creates a separate task file with epic reference
+func createTaskFile(parser *markdown.Parser, taskFilePath string, task *types.Ticket) error {
+	// Ensure directory exists
+	dir := filepath.Dir(taskFilePath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
+	}
+
+	// Generate markdown content with epic reference
+	content := generateTaskMarkdown(task)
+
+	return os.WriteFile(taskFilePath, []byte(content), 0644)
+}
+
+// generateTaskMarkdown generates markdown content for a task with epic reference
+func generateTaskMarkdown(task *types.Ticket) string {
+	var lines []string
+
+	// Add epic reference at the top
+	if task.EpicKey != "" {
+		lines = append(lines, fmt.Sprintf("**Epic:** [%s](%s.md)", task.EpicKey, task.EpicKey))
+		lines = append(lines, "")
+	}
+
+	// Add task header
+	header := fmt.Sprintf("## task: %s", task.Title)
+	if task.Key != "" {
+		header = fmt.Sprintf("## task: %s [%s]", task.Title, task.Key)
+	}
+	lines = append(lines, header)
+	lines = append(lines, "")
+
+	// Add raw content
+	if task.RawContent != "" {
+		lines = append(lines, task.RawContent)
+		lines = append(lines, "")
+	}
+
+	// Add enriched content if available
+	if task.Enriched != "" {
+		lines = append(lines, "---")
+		lines = append(lines, "*Enriched:*")
+		lines = append(lines, task.Enriched)
+		lines = append(lines, "")
+	}
+
+	// Add metadata if available
+	if task.Key != "" || task.Status != "" || task.Priority != "" {
+		lines = append(lines, "---")
+		lines = append(lines, "*Metadata:*")
+		if task.Key != "" {
+			lines = append(lines, fmt.Sprintf("- Key: %s", task.Key))
+		}
+		if task.Status != "" {
+			lines = append(lines, fmt.Sprintf("- Status: %s", task.Status))
+		}
+		if task.Priority != "" {
+			lines = append(lines, fmt.Sprintf("- Priority: %s", task.Priority))
 		}
 	}
 
-	// Add the new task
-	mdFile.Tickets = append(mdFile.Tickets, *task)
-
-	// Write back to file
-	return parser.WriteFile(epicFilePath, mdFile.Tickets)
+	return strings.Join(lines, "\n")
 }
 
 // createJiraTicket creates a Jira ticket for the task
@@ -345,8 +391,8 @@ func createJiraTicket(task *types.Ticket) error {
 	return nil
 }
 
-// reviewTaskBeforeCreate opens the epic file for review and asks for confirmation
-func reviewTaskBeforeCreate(task *types.Ticket, epicFilePath string) error {
+// reviewTaskBeforeCreate opens the task file for review and asks for confirmation
+func reviewTaskBeforeCreate(task *types.Ticket, taskFilePath string) error {
 	// Get editor from config or environment
 	editor := viper.GetString("general.default_editor")
 	if editor == "" {
@@ -372,9 +418,9 @@ File: %s
 %s
 
 ---
-Review the task above. The task will be added to the epic file and a Jira ticket will be created.
+Review the task above. The task will be created as a separate file and a Jira ticket will be created.
 Save and exit to proceed, or delete all content to cancel.
-`, epicFilePath, formatTaskForReview(task))
+`, taskFilePath, formatTaskForReview(task))
 
 	if _, err := tmpFile.WriteString(reviewContent); err != nil {
 		return fmt.Errorf("failed to write review content: %w", err)
@@ -430,28 +476,33 @@ func formatTaskForReview(task *types.Ticket) string {
 }
 
 // updateTaskWithJiraKey updates the task with the Jira key and renames the file
-func updateTaskWithJiraKey(parser *markdown.Parser, epicFilePath string, task *types.Ticket) error {
-	// Parse existing file
-	mdFile, err := parser.ParseFile(epicFilePath)
+func updateTaskWithJiraKey(parser *markdown.Parser, taskFilePath string, task *types.Ticket) error {
+	// Parse existing file to get the task data
+	mdFile, err := parser.ParseFile(taskFilePath)
 	if err != nil {
-		return fmt.Errorf("failed to parse epic file: %w", err)
+		return fmt.Errorf("failed to parse task file: %w", err)
 	}
 
 	// Find and update the task with the real key
 	for i, t := range mdFile.Tickets {
 		if t.Type == types.TicketTypeTask && t.EpicKey == task.EpicKey && t.Title == task.Title {
 			mdFile.Tickets[i].Key = task.Key
+			// Update the task reference for regeneration
+			*task = mdFile.Tickets[i]
 			break
 		}
 	}
 
-	// Write back to file
-	if err := parser.WriteFile(epicFilePath, mdFile.Tickets); err != nil {
-		return fmt.Errorf("failed to write epic file: %w", err)
+	// Regenerate the markdown content with the new key
+	content := generateTaskMarkdown(task)
+
+	// Write the updated content back to the file
+	if err := os.WriteFile(taskFilePath, []byte(content), 0644); err != nil {
+		return fmt.Errorf("failed to write task file: %w", err)
 	}
 
 	// Rename the file to the correct format
-	if err := renameTaskFile(epicFilePath, task); err != nil {
+	if err := renameTaskFile(taskFilePath, task); err != nil {
 		return fmt.Errorf("failed to rename task file: %w", err)
 	}
 

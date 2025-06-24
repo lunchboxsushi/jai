@@ -121,22 +121,18 @@ func runSubtask(cmd *cobra.Command, args []string) error {
 
 	// Review before creating if enabled
 	if viper.GetBool("general.review_before_create") && !noCreate {
-		if err := reviewSubtaskBeforeCreate(subtask, filePath); err != nil {
+		if err := reviewSubtaskBeforeCreate(subtask, parser.GetTaskFilePath("")); err != nil {
 			return fmt.Errorf("review failed: %w", err)
 		}
 	}
 
-	// Add subtask to file
-	if err := addSubtaskToFile(parser, filePath, subtask); err != nil {
-		return fmt.Errorf("failed to add subtask to file: %w", err)
+	// Create separate subtask file instead of adding to existing file
+	subtaskFilePath := parser.GetTaskFilePath("") // Will be renamed after Jira creation
+	if err := createSubtaskFile(parser, subtaskFilePath, subtask); err != nil {
+		return fmt.Errorf("failed to create subtask file: %w", err)
 	}
 
-	// Show success message based on context
-	if epicKey != "" {
-		fmt.Printf("Subtask added to task %s in epic %s\n", taskKey, epicKey)
-	} else {
-		fmt.Printf("Subtask added to task %s\n", taskKey)
-	}
+	fmt.Printf("Subtask created in separate file\n")
 
 	// Create Jira ticket if enabled
 	if !noCreate {
@@ -145,6 +141,16 @@ func runSubtask(cmd *cobra.Command, args []string) error {
 			fmt.Printf("Warning: Failed to create Jira ticket: %v\n", err)
 		} else {
 			fmt.Printf("Jira ticket created: %s\n", subtask.Key)
+
+			// Update the subtask file with the real Jira key and rename if needed
+			if err := updateSubtaskWithJiraKey(parser, subtaskFilePath, subtask); err != nil {
+				fmt.Printf("Warning: Failed to update subtask with Jira key: %v\n", err)
+			}
+		}
+	} else {
+		// Even if not creating Jira ticket, rename the file to the correct format
+		if err := renameSubtaskFile(subtaskFilePath, subtask); err != nil {
+			fmt.Printf("Warning: Failed to rename subtask file: %v\n", err)
 		}
 	}
 
@@ -204,27 +210,168 @@ Any additional notes or context...
 	return string(content), nil
 }
 
-// addSubtaskToFile adds a subtask to the markdown file
-func addSubtaskToFile(parser *markdown.Parser, filePath string, subtask *types.Ticket) error {
-	// Parse existing file
-	mdFile, err := parser.ParseFile(filePath)
-	if err != nil {
-		// File might not exist or be empty, start fresh
-		mdFile = &types.MarkdownFile{
-			Path:    filePath,
-			Tickets: []types.Ticket{},
+// createSubtaskFile creates a separate subtask file with task/epic references
+func createSubtaskFile(parser *markdown.Parser, subtaskFilePath string, subtask *types.Ticket) error {
+	// Ensure directory exists
+	dir := filepath.Dir(subtaskFilePath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return fmt.Errorf("failed to create directory: %w", err)
+	}
+
+	// Generate markdown content with task/epic references
+	content := generateSubtaskMarkdown(subtask)
+
+	return os.WriteFile(subtaskFilePath, []byte(content), 0644)
+}
+
+// generateSubtaskMarkdown generates markdown content for a subtask with task/epic references
+func generateSubtaskMarkdown(subtask *types.Ticket) string {
+	var lines []string
+
+	// Add task reference at the top
+	if subtask.ParentKey != "" {
+		lines = append(lines, fmt.Sprintf("**Task:** [%s](%s.md)", subtask.ParentKey, subtask.ParentKey))
+		lines = append(lines, "")
+	}
+
+	// Add epic reference if available
+	if subtask.EpicKey != "" {
+		lines = append(lines, fmt.Sprintf("**Epic:** [%s](%s.md)", subtask.EpicKey, subtask.EpicKey))
+		lines = append(lines, "")
+	}
+
+	// Add subtask header
+	header := fmt.Sprintf("### subtask: %s", subtask.Title)
+	if subtask.Key != "" {
+		header = fmt.Sprintf("### subtask: %s [%s]", subtask.Title, subtask.Key)
+	}
+	lines = append(lines, header)
+	lines = append(lines, "")
+
+	// Add raw content
+	if subtask.RawContent != "" {
+		lines = append(lines, subtask.RawContent)
+		lines = append(lines, "")
+	}
+
+	// Add enriched content if available
+	if subtask.Enriched != "" {
+		lines = append(lines, "---")
+		lines = append(lines, "*Enriched:*")
+		lines = append(lines, subtask.Enriched)
+		lines = append(lines, "")
+	}
+
+	// Add metadata if available
+	if subtask.Key != "" || subtask.Status != "" || subtask.Priority != "" {
+		lines = append(lines, "---")
+		lines = append(lines, "*Metadata:*")
+		if subtask.Key != "" {
+			lines = append(lines, fmt.Sprintf("- Key: %s", subtask.Key))
+		}
+		if subtask.Status != "" {
+			lines = append(lines, fmt.Sprintf("- Status: %s", subtask.Status))
+		}
+		if subtask.Priority != "" {
+			lines = append(lines, fmt.Sprintf("- Priority: %s", subtask.Priority))
 		}
 	}
 
-	// Add the new subtask
-	mdFile.Tickets = append(mdFile.Tickets, *subtask)
-
-	// Write back to file
-	return parser.WriteFile(filePath, mdFile.Tickets)
+	return strings.Join(lines, "\n")
 }
 
-// reviewSubtaskBeforeCreate opens the markdown file for review and asks for confirmation
-func reviewSubtaskBeforeCreate(subtask *types.Ticket, filePath string) error {
+// updateSubtaskWithJiraKey updates the subtask with the Jira key and renames the file
+func updateSubtaskWithJiraKey(parser *markdown.Parser, subtaskFilePath string, subtask *types.Ticket) error {
+	// Parse existing file to get the subtask data
+	mdFile, err := parser.ParseFile(subtaskFilePath)
+	if err != nil {
+		return fmt.Errorf("failed to parse subtask file: %w", err)
+	}
+
+	// Find and update the subtask with the real key
+	for i, s := range mdFile.Tickets {
+		if s.Type == types.TicketTypeSubtask && s.ParentKey == subtask.ParentKey && s.Title == subtask.Title {
+			mdFile.Tickets[i].Key = subtask.Key
+			// Update the subtask reference for regeneration
+			*subtask = mdFile.Tickets[i]
+			break
+		}
+	}
+
+	// Regenerate the markdown content with the new key
+	content := generateSubtaskMarkdown(subtask)
+
+	// Write the updated content back to the file
+	if err := os.WriteFile(subtaskFilePath, []byte(content), 0644); err != nil {
+		return fmt.Errorf("failed to write subtask file: %w", err)
+	}
+
+	// Rename the file to the correct format
+	if err := renameSubtaskFile(subtaskFilePath, subtask); err != nil {
+		return fmt.Errorf("failed to rename subtask file: %w", err)
+	}
+
+	return nil
+}
+
+// renameSubtaskFile renames the subtask file to the correct SRE-####-{ticket title} format
+func renameSubtaskFile(currentPath string, subtask *types.Ticket) error {
+	// Create the new filename in the correct format
+	// Convert title to filename-safe format
+	safeTitle := strings.ReplaceAll(subtask.Title, " ", "-")
+	safeTitle = strings.ReplaceAll(safeTitle, "/", "-")
+	safeTitle = strings.ReplaceAll(safeTitle, "\\", "-")
+	safeTitle = strings.ReplaceAll(safeTitle, ":", "-")
+	safeTitle = strings.ReplaceAll(safeTitle, "*", "-")
+	safeTitle = strings.ReplaceAll(safeTitle, "?", "-")
+	safeTitle = strings.ReplaceAll(safeTitle, "\"", "-")
+	safeTitle = strings.ReplaceAll(safeTitle, "<", "-")
+	safeTitle = strings.ReplaceAll(safeTitle, ">", "-")
+	safeTitle = strings.ReplaceAll(safeTitle, "|", "-")
+
+	// Remove any double dashes and trim
+	safeTitle = strings.ReplaceAll(safeTitle, "--", "-")
+	safeTitle = strings.Trim(safeTitle, "-")
+
+	// Use subtask key if available, otherwise generate one
+	subtaskKey := subtask.Key
+	if subtaskKey == "" {
+		subtaskKey = generateSubtaskKey(subtask.Title)
+	}
+
+	newFilename := fmt.Sprintf("%s-%s.md", subtaskKey, safeTitle)
+
+	// Get the directory of the current file
+	dir := filepath.Dir(currentPath)
+	newPath := filepath.Join(dir, newFilename)
+
+	// Rename the file
+	if err := os.Rename(currentPath, newPath); err != nil {
+		return fmt.Errorf("failed to rename subtask file: %w", err)
+	}
+
+	fmt.Printf("Subtask file renamed to: %s\n", newFilename)
+	return nil
+}
+
+// generateSubtaskKey generates a key for a subtask
+func generateSubtaskKey(title string) string {
+	// Generate a simple key based on title
+	words := strings.Fields(strings.ToUpper(title))
+	if len(words) == 0 {
+		return "SUB-001"
+	}
+
+	// Take first word and add a number
+	prefix := words[0]
+	if len(prefix) > 3 {
+		prefix = prefix[:3]
+	}
+	return fmt.Sprintf("%s-001", prefix)
+}
+
+// reviewSubtaskBeforeCreate opens the subtask file for review and asks for confirmation
+func reviewSubtaskBeforeCreate(subtask *types.Ticket, subtaskFilePath string) error {
 	// Get editor from config or environment
 	editor := viper.GetString("general.default_editor")
 	if editor == "" {
@@ -250,9 +397,9 @@ File: %s
 %s
 
 ---
-Review the subtask above. The subtask will be added to the epic file and a Jira ticket will be created.
+Review the subtask above. The subtask will be created as a separate file and a Jira ticket will be created.
 Save and exit to proceed, or delete all content to cancel.
-`, filePath, formatSubtaskForReview(subtask))
+`, subtaskFilePath, formatSubtaskForReview(subtask))
 
 	if _, err := tmpFile.WriteString(reviewContent); err != nil {
 		return fmt.Errorf("failed to write review content: %w", err)
