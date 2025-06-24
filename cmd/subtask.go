@@ -64,20 +64,6 @@ func runSubtask(cmd *cobra.Command, args []string) error {
 	// Initialize parser
 	parser := markdown.NewParser(dataDir)
 
-	// Determine file path - if we have epic context, use epic file, otherwise use task file
-	var filePath string
-	if epicKey != "" {
-		filePath = parser.GetEpicFilePath(epicKey)
-	} else {
-		// Create a task-specific file path
-		filePath = parser.GetTaskFilePath(taskKey)
-	}
-
-	// Ensure file exists
-	if err := parser.EnsureFileExists(filePath); err != nil {
-		return fmt.Errorf("failed to create file: %w", err)
-	}
-
 	// Open editor for subtask drafting
 	rawContent, err := openEditorForSubtask()
 	if err != nil {
@@ -152,6 +138,34 @@ func runSubtask(cmd *cobra.Command, args []string) error {
 		// Even if not creating Jira ticket, rename the file to the correct format
 		if err := renameSubtaskFile(subtaskFilePath, subtask); err != nil {
 			fmt.Printf("Warning: Failed to rename subtask file: %v\n", err)
+		}
+	}
+
+	// Set focus to the newly created subtask
+	if subtask.Key != "" {
+		// If we have a Jira key, set both epic and task context
+		if subtask.EpicKey != "" && subtask.ParentKey != "" {
+			if err := ctxManager.SetEpicAndTask(subtask.EpicKey, "", subtask.ParentKey, ""); err != nil {
+				fmt.Printf("Warning: Failed to set epic and task focus: %v\n", err)
+			} else {
+				fmt.Printf("Focused on subtask: %s [%s] (under task %s)\n", subtask.Title, subtask.Key, subtask.ParentKey)
+			}
+		} else if subtask.ParentKey != "" {
+			// If we only have task context
+			if err := ctxManager.SetTask(subtask.ParentKey, ""); err != nil {
+				fmt.Printf("Warning: Failed to set task focus: %v\n", err)
+			} else {
+				fmt.Printf("Subtask created under task: %s\n", subtask.ParentKey)
+			}
+		}
+	} else {
+		// If no Jira key, we can still set the task context
+		if subtask.ParentKey != "" {
+			if err := ctxManager.SetTask(subtask.ParentKey, ""); err != nil {
+				fmt.Printf("Warning: Failed to set task focus: %v\n", err)
+			} else {
+				fmt.Printf("Subtask created under task: %s\n", subtask.ParentKey)
+			}
 		}
 	}
 

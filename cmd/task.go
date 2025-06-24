@@ -69,12 +69,6 @@ func runTask(cmd *cobra.Command, args []string) error {
 
 	// Initialize parser
 	parser := markdown.NewParser(dataDir)
-	epicFilePath := parser.GetEpicFilePath(epicKey)
-
-	// Ensure epic file exists
-	if err := parser.EnsureFileExists(epicFilePath); err != nil {
-		return fmt.Errorf("failed to create epic file: %w", err)
-	}
 
 	// Open editor for task drafting
 	rawContent, err := openEditorForTask()
@@ -153,6 +147,25 @@ func runTask(cmd *cobra.Command, args []string) error {
 			// Clean up the old file if it still exists and is empty
 			if info, err := os.Stat(taskFilePath); err == nil && info.Size() == 0 {
 				_ = os.Remove(taskFilePath)
+			}
+		}
+	}
+
+	// Set focus to the newly created task
+	if task.Key != "" {
+		// If we have a Jira key, use it
+		if err := ctxManager.SetTask(task.Key, task.ID); err != nil {
+			fmt.Printf("Warning: Failed to set task focus: %v\n", err)
+		} else {
+			fmt.Printf("Focused on task: %s [%s]\n", task.Title, task.Key)
+		}
+	} else {
+		// If no Jira key, we can't set focus yet, but we can update the epic context
+		if task.EpicKey != "" {
+			if err := ctxManager.SetEpic(task.EpicKey, ""); err != nil {
+				fmt.Printf("Warning: Failed to set epic focus: %v\n", err)
+			} else {
+				fmt.Printf("Task created under epic: %s\n", task.EpicKey)
 			}
 		}
 	}

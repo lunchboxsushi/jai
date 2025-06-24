@@ -55,12 +55,12 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	if currentCtx.EpicKey == "" && currentCtx.TaskKey == "" {
 		fmt.Println("  No context set")
 	} else {
+		parser := markdown.NewParser(dataDir)
 		if currentCtx.EpicKey != "" {
 			epicTitle := ""
 			// Try to resolve the actual file and extract the title
 			actualFilePath, err := findEpicFileByKey(dataDir, currentCtx.EpicKey)
 			if err == nil {
-				parser := markdown.NewParser(dataDir)
 				mdFile, err := parser.ParseFile(actualFilePath)
 				if err == nil {
 					for _, ticket := range mdFile.Tickets {
@@ -72,13 +72,31 @@ func runStatus(cmd *cobra.Command, args []string) error {
 				}
 			}
 			if epicTitle != "" {
-				fmt.Printf("  Epic: %s\n", epicTitle)
+				fmt.Printf("  Epic: %s [%s]\n", parser.RemoveJiraKey(epicTitle), currentCtx.EpicKey)
 			} else {
 				fmt.Printf("  Epic: [%s]\n", currentCtx.EpicKey)
 			}
 		}
 		if currentCtx.TaskKey != "" {
-			fmt.Printf("  Task: %s\n", currentCtx.TaskKey)
+			taskTitle := ""
+			// Try to resolve the actual file and extract the title
+			actualFilePath, err := findTaskFileByKey(dataDir, currentCtx.TaskKey)
+			if err == nil {
+				mdFile, err := parser.ParseFile(actualFilePath)
+				if err == nil {
+					for _, ticket := range mdFile.Tickets {
+						if ticket.Key == currentCtx.TaskKey {
+							taskTitle = ticket.Title
+							break
+						}
+					}
+				}
+			}
+			if taskTitle != "" {
+				fmt.Printf("  Task: %s [%s]\n", parser.RemoveJiraKey(taskTitle), currentCtx.TaskKey)
+			} else {
+				fmt.Printf("  Task: [%s]\n", currentCtx.TaskKey)
+			}
 		} else {
 			fmt.Println("  No Tasks")
 		}
@@ -122,6 +140,34 @@ func findEpicFileByKey(dataDir, epicKey string) (string, error) {
 	}
 
 	return "", fmt.Errorf("epic file not found for key: %s", epicKey)
+}
+
+// findTaskFileByKey searches for the actual task file that contains the given key
+func findTaskFileByKey(dataDir, taskKey string) (string, error) {
+	ticketsDir := filepath.Join(dataDir, "tickets")
+	files, err := os.ReadDir(ticketsDir)
+	if err != nil {
+		return "", err
+	}
+
+	parser := markdown.NewParser(dataDir)
+	for _, file := range files {
+		if file.IsDir() || !isMarkdownFile(file.Name()) {
+			continue
+		}
+		filePath := filepath.Join(ticketsDir, file.Name())
+		mdFile, err := parser.ParseFile(filePath)
+		if err != nil {
+			continue
+		}
+		for _, ticket := range mdFile.Tickets {
+			if ticket.Key == taskKey {
+				return filePath, nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("task file not found for key: %s", taskKey)
 }
 
 // showConfigStatus shows the status of configuration

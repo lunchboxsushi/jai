@@ -81,7 +81,7 @@ func interactiveFocus(ctxManager *context.Manager, dataDir string) error {
 
 	fmt.Println("Select an epic:")
 	for i, epic := range epics {
-		fmt.Printf("%d. %s [%s]\n", i+1, epic.Title, epic.Key)
+		fmt.Printf("%d. %s [%s]\n", i+1, parser.RemoveJiraKey(epic.Title), epic.Key)
 	}
 	fmt.Print("Enter number (or blank to cancel): ")
 	selectedEpicIdx := readNumber(len(epics))
@@ -93,7 +93,7 @@ func interactiveFocus(ctxManager *context.Manager, dataDir string) error {
 	if err := ctxManager.SetEpic(epic.Key, epic.ID); err != nil {
 		return fmt.Errorf("failed to set epic context: %w", err)
 	}
-	fmt.Printf("Focused on epic: %s [%s]\n", epic.Title, epic.Key)
+	fmt.Printf("Focused on epic: %s [%s]\n", parser.RemoveJiraKey(epic.Title), epic.Key)
 
 	// 2. List tasks and subtasks under the selected epic
 	tasks, err := listTasksForEpic(parser, ticketsDir, epic.Key)
@@ -122,7 +122,7 @@ func interactiveFocus(ctxManager *context.Manager, dataDir string) error {
 		if ticket.Type == types.TicketTypeSubtask {
 			typeLabel = "Subtask"
 		}
-		fmt.Printf("%d. %s [%s] (%s)\n", i+1, ticket.Title, ticket.Key, typeLabel)
+		fmt.Printf("%d. %s [%s] (%s)\n", i+1, parser.RemoveJiraKey(ticket.Title), ticket.Key, typeLabel)
 	}
 	fmt.Print("Enter number (or blank to stay on epic): ")
 	selectedIdx := readNumber(len(combined))
@@ -138,7 +138,7 @@ func interactiveFocus(ctxManager *context.Manager, dataDir string) error {
 		if err := ctxManager.SetTask(ticket.Key, ticket.ID); err != nil {
 			return fmt.Errorf("failed to set task context: %w", err)
 		}
-		fmt.Printf("Focused on task: %s [%s]\n", ticket.Title, ticket.Key)
+		fmt.Printf("Focused on task: %s [%s]\n", parser.RemoveJiraKey(ticket.Title), ticket.Key)
 
 		// Optionally show subtasks under this task
 		subtasks, err := listSubtasksForTask(parser, ticketsDir, ticket.Key)
@@ -163,7 +163,7 @@ func interactiveFocus(ctxManager *context.Manager, dataDir string) error {
 				return fmt.Errorf("failed to set task context: %w", err)
 			}
 		}
-		fmt.Printf("Focused on subtask: %s [%s]\n", ticket.Title, ticket.Key)
+		fmt.Printf("Focused on subtask: %s [%s]\n", parser.RemoveJiraKey(ticket.Title), ticket.Key)
 	}
 	return nil
 }
@@ -346,20 +346,20 @@ func focusByFuzzyMatch(ctxManager *context.Manager, dataDir string, query string
 	if len(matches) == 1 {
 		// Single match, set it as context
 		ticket := matches[0]
-		return setTicketContext(ctxManager, ticket)
+		return setTicketContext(ctxManager, parser, ticket)
 	}
 
 	// Multiple matches, show selection
 	fmt.Printf("Multiple matches found for '%s':\n", query)
 	for i, ticket := range matches {
-		fmt.Printf("%d. %s [%s] (%s)\n", i+1, ticket.Title, ticket.Key, ticket.Type)
+		fmt.Printf("%d. %s [%s] (%s)\n", i+1, parser.RemoveJiraKey(ticket.Title), ticket.Key, ticket.Type)
 	}
 
 	// For now, just use the first match
 	// In a full implementation, you'd want interactive selection
 	ticket := matches[0]
-	fmt.Printf("Using first match: %s [%s]\n", ticket.Title, ticket.Key)
-	return setTicketContext(ctxManager, ticket)
+	fmt.Printf("Using first match: %s [%s]\n", parser.RemoveJiraKey(ticket.Title), ticket.Key)
+	return setTicketContext(ctxManager, parser, ticket)
 }
 
 // searchTickets searches for tickets matching a query
@@ -401,13 +401,13 @@ func searchTickets(parser *markdown.Parser, ticketsDir string, query string) ([]
 }
 
 // setTicketContext sets the appropriate context based on ticket type
-func setTicketContext(ctxManager *context.Manager, ticket types.Ticket) error {
+func setTicketContext(ctxManager *context.Manager, parser *markdown.Parser, ticket types.Ticket) error {
 	switch ticket.Type {
 	case types.TicketTypeEpic:
 		if err := ctxManager.SetEpic(ticket.Key, ticket.ID); err != nil {
 			return fmt.Errorf("failed to set epic context: %w", err)
 		}
-		fmt.Printf("Focused on epic: %s [%s]\n", ticket.Title, ticket.Key)
+		fmt.Printf("Focused on epic: %s [%s]\n", parser.RemoveJiraKey(ticket.Title), ticket.Key)
 	case types.TicketTypeTask:
 		// For tasks, set both epic and task context if epic is available
 		if ticket.EpicKey != "" {
@@ -419,7 +419,7 @@ func setTicketContext(ctxManager *context.Manager, ticket types.Ticket) error {
 				return fmt.Errorf("failed to set task context: %w", err)
 			}
 		}
-		fmt.Printf("Focused on task: %s [%s]\n", ticket.Title, ticket.Key)
+		fmt.Printf("Focused on task: %s [%s]\n", parser.RemoveJiraKey(ticket.Title), ticket.Key)
 	case types.TicketTypeSubtask:
 		// For subtasks, set epic, task, and subtask context
 		if ticket.EpicKey != "" && ticket.ParentKey != "" {
@@ -435,7 +435,7 @@ func setTicketContext(ctxManager *context.Manager, ticket types.Ticket) error {
 				return fmt.Errorf("failed to set task context: %w", err)
 			}
 		}
-		fmt.Printf("Focused on subtask: %s [%s]\n", ticket.Title, ticket.Key)
+		fmt.Printf("Focused on subtask: %s [%s]\n", parser.RemoveJiraKey(ticket.Title), ticket.Key)
 	}
 
 	return nil

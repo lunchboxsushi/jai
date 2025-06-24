@@ -305,15 +305,15 @@ func (p *Parser) generateHeader(ticket types.Ticket) string {
 	title := ticket.Title
 	if ticket.Key != "" {
 		// Remove key from title if it's already there
-		title = p.removeJiraKey(title)
+		title = p.RemoveJiraKey(title)
 		title = fmt.Sprintf("%s [%s]", title, ticket.Key)
 	}
 
 	return prefix + title
 }
 
-// removeJiraKey removes a Jira key from text
-func (p *Parser) removeJiraKey(text string) string {
+// RemoveJiraKey removes a Jira key from text
+func (p *Parser) RemoveJiraKey(text string) string {
 	re := regexp.MustCompile(`\s*\[?[A-Z]+-\d+\]?\s*`)
 	return strings.TrimSpace(re.ReplaceAllString(text, ""))
 }
