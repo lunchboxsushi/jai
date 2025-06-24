@@ -22,12 +22,10 @@ A CLI-first, markdown-native workflow tool for managing Jira tickets with speed,
 git clone https://github.com/lunchboxsushi/jai.git
 cd jai
 
-# Build the binary
-go build -o jai cmd/jai/main.go
-
-# Install (optional)
-sudo cp jai /usr/local/bin/
+# Install the binary
+go install ./cmd/jai
 ```
+> **Note:** Ensure your Go binary path (`$GOPATH/bin` or `$HOME/go/bin`) is in your system's `PATH`.
 
 ### Initial Setup
 
@@ -35,89 +33,89 @@ sudo cp jai /usr/local/bin/
 # Initialize configuration
 jai config init
 
-# Edit the configuration file with your settings
-# ~/.jai/config.yaml
+# Edit the configuration file with your settings: ~/.jai/config.yaml
 ```
 
 ### Basic Workflow
 
 ```bash
-# Set epic context
-jai epic "SRE-5912"
+# 1. Create a new epic
+jai epic
+# ... an editor opens to draft the epic.
+# After saving, the epic is enriched by AI and a Jira ticket is created.
 
-# Create a new task
+# 2. Or, focus on an existing epic
+jai focus "Name of my epic" # Fuzzy match on title
+jai focus "SRE-1234"       # Exact match on key
+
+# 3. Create a new task under the current epic
 jai task
+# ... editor opens, AI enriches, Jira ticket created, and focus is set.
 
-# Add a subtask to current task
+# 4. Create a new sub-task
 jai subtask
-
-# Quick append
-jai new "fix login bug"
+# ... same workflow, linked to the parent task.
 ```
 
 ## 🔁 Workflow Summary
 
-### Starting Work on a New Task
+The core workflow is designed to be fast and seamless. The `epic`, `task`, and `subtask` commands handle the entire lifecycle from drafting to Jira creation.
+
+### Starting Work
 
 ```bash
-jai epic "SRE-5912"     # Set current epic context
-jai task                 # Open new task draft under current epic
-jai enrich               # Auto-enrich the task with polished manager-facing language
-jai create               # Review (optional), then create Jira ticket
+# To work on a new feature, start by creating an epic:
+jai epic
+
+# To work on an existing epic, focus it first:
+jai focus "SRE-1234"
+
+# With an epic in context, create a task:
+jai task
+
+# With a task in context, create a sub-task:
+jai subtask
 ```
 
-### Adding a Sub-task to Current Task
+### Disabling AI Enrichment or Jira Creation
+
+You can skip the AI or Jira steps using flags:
 
 ```bash
-jai subtask              # Draft and enrich a sub-task under current focused task
+# Create a task without AI enrichment
+jai task --no-enrich
+
+# Create an epic locally without creating a Jira ticket
+jai epic --no-create
 ```
 
-### Quick Append via `new`
+### Checking Your Context
+
+At any time, see what you're focused on:
 
 ```bash
-jai new                  # Append new task/sub-task to current context file
-```
-
-### Focusing Existing Tickets
-
-```bash
-jai focus "SRE-1234"     # Set focus using Jira ID or fuzzy title match
-```
-
-### Syncing
-
-```bash
-jai sync --status        # Pull updated Jira ticket status into local markdown
-```
-
-### Capturing Ideas
-
-```bash
-jai capture "explore OpenPipeline perf boost"
+jai status
 ```
 
 ## 📖 Commands
 
 ### Core Commands
 
-- `epic [title|key]` - Set or switch current epic context
-- `task` - Add a new task under the current epic
-- `subtask` - Add a new sub-task under the current task
-- `new [content]` - Quickly append a task or sub-task to current context
+- `epic` - Create a new epic. Opens an editor for drafting, enriches with AI, and creates a Jira ticket.
+- `task` - Create a new task under the current epic. Follows the same draft -> enrich -> create workflow.
+- `subtask` - Create a new sub-task under the current task.
 
 ### Context Management
 
-- `focus <query>` - Set current context by fuzzy-matching epic/task title
-- `unfocus` - Clear current context
-- `status` - Show current focus and context
+- `focus <query>` - Set current context by fuzzy-matching an epic/task title or key.
+- `status` - Show the current focused epic and/or task.
 
 ### Configuration
 
-- `config init` - Initialize configuration
-- `config show` - Show current configuration
-- `config set <key> <value>` - Set configuration value
+- `config init` - Initialize a new configuration file.
+- `config show` - Show the current configuration.
 
-## 📁 Project Structure
+## �� Project Structure
 
 ```text
 ~/.local/share/jai/
