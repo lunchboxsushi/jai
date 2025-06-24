@@ -163,6 +163,7 @@ jira:
   username: "your-email@company.com"
   token: "your-api-token"
   project: "PROJ"
+  epic_link_field: customfield_XXXXX  # Replace XXXXX with your field ID
 
 ai:
   provider: "openai"
@@ -267,3 +268,22 @@ MIT License - see LICENSE file for details.
 - Built with Go and the excellent Cobra CLI framework
 - Uses OpenAI for intelligent task enrichment
 - Integrates with Atlassian Jira Cloud API 
+
+## Jira Epic Link Field Configuration
+
+If your Jira instance uses a custom field for linking tasks to epics (common in Jira Cloud), you must specify the correct field ID in your configuration for proper epic-task linking.
+
+### How to Find Your Epic Link Field ID
+1. Go to **Jira Administration → Issues → Custom Fields**.
+2. Search for **Epic Link**.
+3. Click the three dots (`...`) next to Epic Link and select **View field information** or **Configure**.
+4. In the URL, look for a number at the end (e.g., `id=10009`).
+5. Your field ID will be `customfield_10009` (replace `10009` with your value).
+
+### Example Configuration
+```yaml
+jira:
+  epic_link_field: customfield_XXXXX  # Replace XXXXX with your field ID
+```
+
+This is required for tasks to be properly linked to epics in Jira. If not set, you may see errors or tasks may not be linked to epics. 

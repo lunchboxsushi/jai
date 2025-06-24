@@ -65,7 +65,7 @@ func runFocus(cmd *cobra.Command, args []string) error {
 	return focusByFuzzyMatch(ctxManager, dataDir, query)
 }
 
-// interactiveFocus provides a hierarchical selection: epics -> tasks
+// interactiveFocus provides a hierarchical selection: epics -> tasks -> subtasks
 func interactiveFocus(ctxManager *context.Manager, dataDir string) error {
 	parser := markdown.NewParser(dataDir)
 	ticketsDir := filepath.Join(dataDir, "tickets")
@@ -95,31 +95,76 @@ func interactiveFocus(ctxManager *context.Manager, dataDir string) error {
 	}
 	fmt.Printf("Focused on epic: %s [%s]\n", epic.Title, epic.Key)
 
-	// 2. List tasks under the selected epic
+	// 2. List tasks and subtasks under the selected epic
 	tasks, err := listTasksForEpic(parser, ticketsDir, epic.Key)
 	if err != nil {
 		return fmt.Errorf("failed to list tasks: %w", err)
 	}
-	if len(tasks) == 0 {
-		fmt.Println("No tasks found under this epic.")
+	subtasks, err := listSubtasksForEpic(parser, ticketsDir, epic.Key)
+	if err != nil {
+		return fmt.Errorf("failed to list subtasks: %w", err)
+	}
+	if len(tasks) == 0 && len(subtasks) == 0 {
+		fmt.Println("No tasks or subtasks found under this epic.")
 		return nil
 	}
 
-	fmt.Println("Select a task:")
-	for i, task := range tasks {
-		fmt.Printf("%d. %s [%s]\n", i+1, task.Title, task.Key)
+	fmt.Println("Select a task or subtask:")
+	combined := make([]types.Ticket, 0, len(tasks)+len(subtasks))
+	for _, task := range tasks {
+		combined = append(combined, task)
+	}
+	for _, subtask := range subtasks {
+		combined = append(combined, subtask)
+	}
+	for i, ticket := range combined {
+		typeLabel := "Task"
+		if ticket.Type == types.TicketTypeSubtask {
+			typeLabel = "Subtask"
+		}
+		fmt.Printf("%d. %s [%s] (%s)\n", i+1, ticket.Title, ticket.Key, typeLabel)
 	}
 	fmt.Print("Enter number (or blank to stay on epic): ")
-	selectedTaskIdx := readNumber(len(tasks))
-	if selectedTaskIdx == -1 {
+	selectedIdx := readNumber(len(combined))
+	if selectedIdx == -1 {
 		fmt.Println("Staying focused on epic.")
 		return nil
 	}
-	task := tasks[selectedTaskIdx]
-	if err := ctxManager.SetTask(task.Key, task.ID); err != nil {
-		return fmt.Errorf("failed to set task context: %w", err)
+	ticket := combined[selectedIdx]
+
+	// Set context based on ticket type
+	switch ticket.Type {
+	case types.TicketTypeTask:
+		if err := ctxManager.SetTask(ticket.Key, ticket.ID); err != nil {
+			return fmt.Errorf("failed to set task context: %w", err)
+		}
+		fmt.Printf("Focused on task: %s [%s]\n", ticket.Title, ticket.Key)
+
+		// Optionally show subtasks under this task
+		subtasks, err := listSubtasksForTask(parser, ticketsDir, ticket.Key)
+		if err != nil {
+			fmt.Printf("Warning: Failed to list subtasks: %v\n", err)
+		} else if len(subtasks) > 0 {
+			fmt.Printf("Found %d subtasks under this task.\n", len(subtasks))
+		}
+
+	case types.TicketTypeSubtask:
+		// For subtasks, set both epic and task context
+		if ticket.EpicKey != "" && ticket.ParentKey != "" {
+			if err := ctxManager.SetEpicAndTask(ticket.EpicKey, "", ticket.ParentKey, ""); err != nil {
+				return fmt.Errorf("failed to set epic and task context: %w", err)
+			}
+		} else if ticket.EpicKey != "" {
+			if err := ctxManager.SetEpic(ticket.EpicKey, ""); err != nil {
+				return fmt.Errorf("failed to set epic context: %w", err)
+			}
+		} else if ticket.ParentKey != "" {
+			if err := ctxManager.SetTask(ticket.ParentKey, ""); err != nil {
+				return fmt.Errorf("failed to set task context: %w", err)
+			}
+		}
+		fmt.Printf("Focused on subtask: %s [%s]\n", ticket.Title, ticket.Key)
 	}
-	fmt.Printf("Focused on task: %s [%s]\n", task.Title, task.Key)
 	return nil
 }
 
@@ -161,6 +206,7 @@ func listTasksForEpic(parser *markdown.Parser, ticketsDir string, epicKey string
 		}
 		return nil, err
 	}
+	epicKeyNorm := strings.TrimSpace(strings.ToUpper(epicKey))
 	for _, file := range files {
 		if file.IsDir() || !isMarkdownFile(file.Name()) {
 			continue
@@ -171,12 +217,86 @@ func listTasksForEpic(parser *markdown.Parser, ticketsDir string, epicKey string
 			continue
 		}
 		for _, ticket := range mdFile.Tickets {
-			if ticket.Type == types.TicketTypeTask && ticket.EpicKey == epicKey {
-				tasks = append(tasks, ticket)
+			if ticket.Type == types.TicketTypeTask {
+				// Check both EpicKey and ParentKey (for backward compatibility)
+				ticketEpicKey := strings.TrimSpace(strings.ToUpper(ticket.EpicKey))
+				if ticketEpicKey == epicKeyNorm {
+					tasks = append(tasks, ticket)
+				}
 			}
 		}
 	}
+	if len(tasks) == 0 {
+		fmt.Printf("[debug] No tasks found for epic key '%s'.\n", epicKey)
+		fmt.Println("[debug] Check that your task files have the correct ParentKey field set and match the selected epic.")
+	}
 	return tasks, nil
+}
+
+// listSubtasksForEpic returns all subtasks for a given epic key
+func listSubtasksForEpic(parser *markdown.Parser, ticketsDir string, epicKey string) ([]types.Ticket, error) {
+	var subtasks []types.Ticket
+	files, err := os.ReadDir(ticketsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return subtasks, nil
+		}
+		return nil, err
+	}
+	epicKeyNorm := strings.TrimSpace(strings.ToUpper(epicKey))
+	for _, file := range files {
+		if file.IsDir() || !isMarkdownFile(file.Name()) {
+			continue
+		}
+		filePath := filepath.Join(ticketsDir, file.Name())
+		mdFile, err := parser.ParseFile(filePath)
+		if err != nil {
+			continue
+		}
+		for _, ticket := range mdFile.Tickets {
+			if ticket.Type == types.TicketTypeSubtask {
+				// Check EpicKey for subtasks
+				parentEpic := strings.TrimSpace(strings.ToUpper(ticket.EpicKey))
+				if parentEpic == epicKeyNorm {
+					subtasks = append(subtasks, ticket)
+				}
+			}
+		}
+	}
+	return subtasks, nil
+}
+
+// listSubtasksForTask returns all subtasks for a given task key
+func listSubtasksForTask(parser *markdown.Parser, ticketsDir string, taskKey string) ([]types.Ticket, error) {
+	var subtasks []types.Ticket
+	files, err := os.ReadDir(ticketsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return subtasks, nil
+		}
+		return nil, err
+	}
+	taskKeyNorm := strings.TrimSpace(strings.ToUpper(taskKey))
+	for _, file := range files {
+		if file.IsDir() || !isMarkdownFile(file.Name()) {
+			continue
+		}
+		filePath := filepath.Join(ticketsDir, file.Name())
+		mdFile, err := parser.ParseFile(filePath)
+		if err != nil {
+			continue
+		}
+		for _, ticket := range mdFile.Tickets {
+			if ticket.Type == types.TicketTypeSubtask {
+				// Check TaskKey (ParentKey field) for subtasks
+				parentTask := strings.TrimSpace(strings.ToUpper(ticket.ParentKey))
+				if parentTask == taskKeyNorm {
+					subtasks = append(subtasks, ticket)
+				}
+			}
+		}
+	}
+	return subtasks, nil
 }
 
 // readNumber reads a number from stdin, returns -1 if blank/cancel
@@ -289,13 +409,31 @@ func setTicketContext(ctxManager *context.Manager, ticket types.Ticket) error {
 		}
 		fmt.Printf("Focused on epic: %s [%s]\n", ticket.Title, ticket.Key)
 	case types.TicketTypeTask:
-		if err := ctxManager.SetTask(ticket.Key, ticket.ID); err != nil {
-			return fmt.Errorf("failed to set task context: %w", err)
+		// For tasks, set both epic and task context if epic is available
+		if ticket.EpicKey != "" {
+			if err := ctxManager.SetEpicAndTask(ticket.EpicKey, "", ticket.Key, ticket.ID); err != nil {
+				return fmt.Errorf("failed to set epic and task context: %w", err)
+			}
+		} else {
+			if err := ctxManager.SetTask(ticket.Key, ticket.ID); err != nil {
+				return fmt.Errorf("failed to set task context: %w", err)
+			}
 		}
 		fmt.Printf("Focused on task: %s [%s]\n", ticket.Title, ticket.Key)
 	case types.TicketTypeSubtask:
-		if err := ctxManager.SetTask(ticket.Key, ticket.ID); err != nil {
-			return fmt.Errorf("failed to set subtask context: %w", err)
+		// For subtasks, set epic, task, and subtask context
+		if ticket.EpicKey != "" && ticket.ParentKey != "" {
+			if err := ctxManager.SetEpicAndTask(ticket.EpicKey, "", ticket.ParentKey, ""); err != nil {
+				return fmt.Errorf("failed to set epic and task context: %w", err)
+			}
+		} else if ticket.EpicKey != "" {
+			if err := ctxManager.SetEpic(ticket.EpicKey, ""); err != nil {
+				return fmt.Errorf("failed to set epic context: %w", err)
+			}
+		} else if ticket.ParentKey != "" {
+			if err := ctxManager.SetTask(ticket.ParentKey, ""); err != nil {
+				return fmt.Errorf("failed to set task context: %w", err)
+			}
 		}
 		fmt.Printf("Focused on subtask: %s [%s]\n", ticket.Title, ticket.Key)
 	}

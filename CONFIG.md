@@ -66,6 +66,7 @@ general:
 | `jira.username` | string | Yes | Your Jira username/email |
 | `jira.project` | string | Yes | Default project key for new tickets |
 | `jira.token` | **environment only** | Yes | Your Jira API token (via `JAI_JIRA_TOKEN`) |
+| `jira.epic_link_field` | string | No | Custom field ID for linking tasks to epics |
 
 **Example:**
 ```yaml
@@ -74,6 +75,7 @@ jira:
   username: "john.doe@acme.com"
   project: "SRE"
   # token: NOT stored in config file
+  epic_link_field: customfield_XXXXX  # Replace XXXXX with your field ID
 ```
 
 **Environment Variable:**
@@ -238,3 +240,22 @@ Configuration is loaded at startup. To reload configuration:
 1. Edit the config file
 2. Restart JAI
 3. Or use `jai config show` to verify changes 
+
+### Jira Epic Link Field
+
+If your Jira instance uses a custom field for linking tasks to epics, you must specify the correct field ID in your configuration.
+
+#### How to Find the Field ID
+1. Go to Jira Administration → Issues → Custom Fields.
+2. Search for 'Epic Link'.
+3. Click the three dots (`...`) next to Epic Link and select 'View field information' or 'Configure'.
+4. The URL will end with a number (e.g., `id=10009`).
+5. Your field ID is `customfield_10009` (replace `10009` with your value).
+
+#### Example
+```yaml
+jira:
+  epic_link_field: customfield_XXXXX  # Replace XXXXX with your field ID
+```
+
+This is required for tasks to be properly linked to epics in Jira. 

@@ -95,6 +95,7 @@ func runTask(cmd *cobra.Command, args []string) error {
 		EpicKey:    epicKey,
 		Created:    time.Now(),
 		Updated:    time.Now(),
+		Assignee:   viper.GetString("jira.username"),
 	}
 
 	// Enrich with AI if enabled
@@ -148,6 +149,11 @@ func runTask(cmd *cobra.Command, args []string) error {
 		// Even if not creating Jira ticket, rename the file to the correct format
 		if err := renameTaskFile(taskFilePath, task); err != nil {
 			fmt.Printf("Warning: Failed to rename task file: %v\n", err)
+		} else {
+			// Clean up the old file if it still exists and is empty
+			if info, err := os.Stat(taskFilePath); err == nil && info.Size() == 0 {
+				_ = os.Remove(taskFilePath)
+			}
 		}
 	}
 
@@ -334,20 +340,22 @@ func generateTaskMarkdown(task *types.Ticket) string {
 		lines = append(lines, "")
 	}
 
-	// Add metadata if available
-	if task.Key != "" || task.Status != "" || task.Priority != "" {
-		lines = append(lines, "---")
-		lines = append(lines, "*Metadata:*")
-		if task.Key != "" {
-			lines = append(lines, fmt.Sprintf("- Key: %s", task.Key))
-		}
-		if task.Status != "" {
-			lines = append(lines, fmt.Sprintf("- Status: %s", task.Status))
-		}
-		if task.Priority != "" {
-			lines = append(lines, fmt.Sprintf("- Priority: %s", task.Priority))
-		}
+	// Add metadata section
+	lines = append(lines, "---")
+	lines = append(lines, "*Metadata:*")
+	if task.Key != "" {
+		lines = append(lines, fmt.Sprintf("- Key: %s", task.Key))
 	}
+	if task.Status != "" {
+		lines = append(lines, fmt.Sprintf("- Status: %s", task.Status))
+	}
+	if task.Priority != "" {
+		lines = append(lines, fmt.Sprintf("- Priority: %s", task.Priority))
+	}
+	if task.EpicKey != "" {
+		lines = append(lines, fmt.Sprintf("- ParentKey: %s", task.EpicKey))
+	}
+	lines = append(lines, "")
 
 	return strings.Join(lines, "\n")
 }
@@ -357,15 +365,17 @@ func createJiraTicket(task *types.Ticket) error {
 	// Get Jira config
 	jiraConfig := &types.Config{
 		Jira: struct {
-			URL      string `yaml:"url" json:"url"`
-			Username string `yaml:"username" json:"username"`
-			Token    string `yaml:"token" json:"token"`
-			Project  string `yaml:"project" json:"project"`
+			URL           string `yaml:"url" json:"url"`
+			Username      string `yaml:"username" json:"username"`
+			Token         string `yaml:"token" json:"token"`
+			Project       string `yaml:"project" json:"project"`
+			EpicLinkField string `yaml:"epic_link_field" json:"epic_link_field"`
 		}{
-			URL:      viper.GetString("jira.url"),
-			Username: viper.GetString("jira.username"),
-			Token:    os.Getenv("JAI_JIRA_TOKEN"),
-			Project:  viper.GetString("jira.project"),
+			URL:           viper.GetString("jira.url"),
+			Username:      viper.GetString("jira.username"),
+			Token:         os.Getenv("JAI_JIRA_TOKEN"),
+			Project:       viper.GetString("jira.project"),
+			EpicLinkField: viper.GetString("jira.epic_link_field"),
 		},
 	}
 

@@ -98,6 +98,7 @@ func runSubtask(cmd *cobra.Command, args []string) error {
 		ParentKey:  taskKey,
 		Created:    time.Now(),
 		Updated:    time.Now(),
+		Assignee:   viper.GetString("jira.username"),
 	}
 
 	// Enrich with AI if enabled
@@ -262,20 +263,22 @@ func generateSubtaskMarkdown(subtask *types.Ticket) string {
 		lines = append(lines, "")
 	}
 
-	// Add metadata if available
-	if subtask.Key != "" || subtask.Status != "" || subtask.Priority != "" {
-		lines = append(lines, "---")
-		lines = append(lines, "*Metadata:*")
-		if subtask.Key != "" {
-			lines = append(lines, fmt.Sprintf("- Key: %s", subtask.Key))
-		}
-		if subtask.Status != "" {
-			lines = append(lines, fmt.Sprintf("- Status: %s", subtask.Status))
-		}
-		if subtask.Priority != "" {
-			lines = append(lines, fmt.Sprintf("- Priority: %s", subtask.Priority))
-		}
+	// Add metadata section
+	lines = append(lines, "---")
+	lines = append(lines, "*Metadata:*")
+	if subtask.Key != "" {
+		lines = append(lines, fmt.Sprintf("- Key: %s", subtask.Key))
 	}
+	if subtask.Status != "" {
+		lines = append(lines, fmt.Sprintf("- Status: %s", subtask.Status))
+	}
+	if subtask.Priority != "" {
+		lines = append(lines, fmt.Sprintf("- Priority: %s", subtask.Priority))
+	}
+	if subtask.ParentKey != "" {
+		lines = append(lines, fmt.Sprintf("- TaskKey: %s", subtask.ParentKey))
+	}
+	lines = append(lines, "")
 
 	return strings.Join(lines, "\n")
 }

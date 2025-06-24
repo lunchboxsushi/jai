@@ -54,9 +54,18 @@ func (c *Client) CreateTicket(ticket *types.Ticket) (*types.Ticket, error) {
 
 	// Set epic link if this is a task or subtask
 	if ticket.Type == types.TicketTypeTask && ticket.EpicKey != "" {
-		// For now, we'll skip epic linking as it requires custom field handling
-		// In a full implementation, you'd need to map the epic link custom field
-		fmt.Printf("Note: Epic linking to %s would be set here\n", ticket.EpicKey)
+		// Get the epic link custom field ID
+		epicLinkField, err := c.GetEpicLinkField()
+		if err != nil {
+			log.Printf("Warning: Failed to get epic link field: %v", err)
+		} else {
+			// Set the epic link using custom fields
+			if issue.Fields.Unknowns == nil {
+				issue.Fields.Unknowns = make(map[string]interface{})
+			}
+			issue.Fields.Unknowns[epicLinkField] = ticket.EpicKey
+			log.Printf("Setting epic link: %s = %s", epicLinkField, ticket.EpicKey)
+		}
 	}
 
 	// Set parent for subtasks
@@ -200,6 +209,15 @@ func (c *Client) convertJiraIssue(issue *jira.Issue) *types.Ticket {
 	// Note: Epic linking would require custom field handling
 	// For now, we'll skip this as it's complex to implement
 
+	// Extract epic link if present
+	if issue.Fields.Unknowns != nil {
+		if epicLinkField, err := c.GetEpicLinkField(); err == nil {
+			if epicKey, ok := issue.Fields.Unknowns[epicLinkField].(string); ok {
+				ticket.EpicKey = epicKey
+			}
+		}
+	}
+
 	return ticket
 }
 
@@ -217,7 +235,20 @@ func (c *Client) getIssueTypeName(ticketType types.TicketType) string {
 
 // GetEpicLinkField returns the custom field ID for epic links
 func (c *Client) GetEpicLinkField() (string, error) {
-	// This would typically be configured or discovered via API
-	// For now, we'll use a common default
-	return "customfield_10014", nil
+	// Check if configured in config first
+	if c.config.Jira.EpicLinkField != "" {
+		return c.config.Jira.EpicLinkField, nil
+	}
+
+	// Common epic link field IDs for different Jira setups
+	// These are the most common field IDs used for epic linking
+	commonEpicFields := []string{
+		"customfield_10014", // Most common
+		"customfield_10008", // Alternative
+		"customfield_10016", // Another common one
+	}
+
+	// For now, return the most common one
+	// In a full implementation, you could query the Jira API to discover the correct field
+	return commonEpicFields[0], nil
 }

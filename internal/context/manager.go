@@ -80,6 +80,15 @@ func (m *Manager) SetEpic(key, id string) error {
 	return m.Save()
 }
 
+// SetEpicAndTask sets both epic and task context without clearing task
+func (m *Manager) SetEpicAndTask(epicKey, epicID, taskKey, taskID string) error {
+	m.context.EpicKey = epicKey
+	m.context.EpicID = epicID
+	m.context.TaskKey = taskKey
+	m.context.TaskID = taskID
+	return m.Save()
+}
+
 // SetTask sets the current task context
 func (m *Manager) SetTask(key, id string) error {
 	m.context.TaskKey = key

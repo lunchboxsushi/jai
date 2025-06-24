@@ -315,15 +315,17 @@ func createJiraEpic(epic *types.Ticket) error {
 	// Get Jira config
 	jiraConfig := &types.Config{
 		Jira: struct {
-			URL      string `yaml:"url" json:"url"`
-			Username string `yaml:"username" json:"username"`
-			Token    string `yaml:"token" json:"token"`
-			Project  string `yaml:"project" json:"project"`
+			URL           string `yaml:"url" json:"url"`
+			Username      string `yaml:"username" json:"username"`
+			Token         string `yaml:"token" json:"token"`
+			Project       string `yaml:"project" json:"project"`
+			EpicLinkField string `yaml:"epic_link_field" json:"epic_link_field"`
 		}{
-			URL:      viper.GetString("jira.url"),
-			Username: viper.GetString("jira.username"),
-			Token:    os.Getenv("JAI_JIRA_TOKEN"),
-			Project:  viper.GetString("jira.project"),
+			URL:           viper.GetString("jira.url"),
+			Username:      viper.GetString("jira.username"),
+			Token:         os.Getenv("JAI_JIRA_TOKEN"),
+			Project:       viper.GetString("jira.project"),
+			EpicLinkField: viper.GetString("jira.epic_link_field"),
 		},
 	}
 

@@ -49,10 +49,11 @@ const (
 // Config represents the application configuration
 type Config struct {
 	Jira struct {
-		URL      string `yaml:"url" json:"url"`
-		Username string `yaml:"username" json:"username"`
-		Token    string `yaml:"token" json:"token"`
-		Project  string `yaml:"project" json:"project"`
+		URL           string `yaml:"url" json:"url"`
+		Username      string `yaml:"username" json:"username"`
+		Token         string `yaml:"token" json:"token"`
+		Project       string `yaml:"project" json:"project"`
+		EpicLinkField string `yaml:"epic_link_field" json:"epic_link_field"`
 	} `yaml:"jira" json:"jira"`
 
 	AI struct {
