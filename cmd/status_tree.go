@@ -18,14 +18,16 @@ var (
 	focusedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("202")).Bold(true)
 	// Epics: purple
 	epicStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#a259ec")).Bold(true)
-	// Tasks: darker blue
-	taskStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#2563eb")).Bold(true)
+	// Tasks: lighter blue for better readability
+	taskStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#3b82f6")).Bold(true)
 	// Subtasks: light blue (matches screenshot)
 	subtaskStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#60a5fa")).Bold(true)
 	// Description: warm orange for focused, white for others
 	descStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#f4a259")).Bold(true)
 	whiteStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Bold(true)
 	dimStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Faint(true)
+	// Bright orange asterisk for focused item
+	focusAsteriskStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#ffb300")).Bold(true)
 )
 
 func renderStatusTree(ctxManager *context.Manager) error {
@@ -148,7 +150,7 @@ func formatNodeTitle(kind, title, key string, isFocused bool, style lipgloss.Sty
 	}
 	label := fmt.Sprintf("%s %s: %s", prefix, keyPart, desc)
 	if isFocused {
-		return focusedStyle.Render(label + " [FOCUSED]")
+		return focusAsteriskStyle.Render("*") + label
 	}
 	// Dim non-focused items
 	return dimStyle.Render(label)
