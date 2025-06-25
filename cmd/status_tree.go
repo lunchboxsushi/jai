@@ -16,9 +16,16 @@ import (
 
 var (
 	focusedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("202")).Bold(true)
-	epicStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true)
-	taskStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("81"))
-	subtaskStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	// Epics: purple
+	epicStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#a259ec")).Bold(true)
+	// Tasks: darker blue
+	taskStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#2563eb")).Bold(true)
+	// Subtasks: light blue (matches screenshot)
+	subtaskStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#60a5fa")).Bold(true)
+	// Description: warm orange for focused, white for others
+	descStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#f4a259")).Bold(true)
+	whiteStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Bold(true)
+	dimStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Faint(true)
 )
 
 func renderStatusTree(ctxManager *context.Manager) error {
@@ -60,6 +67,9 @@ func renderStatusTree(ctxManager *context.Manager) error {
 	tasks := findChildTasks(rootEpic.Key, allTickets)
 	treeRoot := buildTree(rootEpic, tasks, allTickets, currentCtx)
 
+	// Use rounded enumerator for a more visually distinct tree
+	treeRoot.Enumerator(treepkg.RoundedEnumerator)
+
 	fmt.Println(treeRoot.String())
 
 	return nil
@@ -87,18 +97,28 @@ func findChildSubtasks(taskKey string, allTickets []types.Ticket) []*types.Ticke
 
 func buildTree(epic *types.Ticket, tasks []*types.Ticket, allTickets []types.Ticket, ctx *types.Context) *treepkg.Tree {
 	parser := markdown.NewParser("")
-	epictitle := formatNodeTitle(parser.RemoveJiraKey(epic.Title), epic.Key, ctx.EpicKey == epic.Key, epicStyle)
+	// Only deepest focus gets [FOCUSED]
+	focusLevel := ""
+	if ctx.SubtaskKey != "" {
+		focusLevel = "subtask"
+	} else if ctx.TaskKey != "" {
+		focusLevel = "task"
+	} else if ctx.EpicKey != "" {
+		focusLevel = "epic"
+	}
+
+	epictitle := formatNodeTitle("Epic", parser.RemoveJiraKey(epic.Title), epic.Key, focusLevel == "epic" && ctx.EpicKey == epic.Key, epicStyle)
 	tree := treepkg.New().Root(epictitle)
 
 	for _, task := range tasks {
-		isFocused := ctx.TaskKey == task.Key
-		taskTitle := formatNodeTitle(parser.RemoveJiraKey(task.Title), task.Key, isFocused, taskStyle)
+		isTaskFocused := focusLevel == "task" && ctx.TaskKey == task.Key
+		taskTitle := formatNodeTitle("Task", parser.RemoveJiraKey(task.Title), task.Key, isTaskFocused, taskStyle)
 		taskTree := treepkg.New().Root(taskTitle)
 
 		subtasks := findChildSubtasks(task.Key, allTickets)
 		for _, subtask := range subtasks {
-			isSubFocused := ctx.SubtaskKey == subtask.Key
-			subtaskTitle := formatNodeTitle(parser.RemoveJiraKey(subtask.Title), subtask.Key, isSubFocused, subtaskStyle)
+			isSubFocused := focusLevel == "subtask" && ctx.SubtaskKey == subtask.Key
+			subtaskTitle := formatNodeTitle("Subtask", parser.RemoveJiraKey(subtask.Title), subtask.Key, isSubFocused, subtaskStyle)
 			taskTree.Child(subtaskTitle)
 		}
 		tree.Child(taskTree)
@@ -107,15 +127,28 @@ func buildTree(epic *types.Ticket, tasks []*types.Ticket, allTickets []types.Tic
 	return tree
 }
 
-func formatNodeTitle(title, key string, isFocused bool, style lipgloss.Style) string {
-	if strings.TrimSpace(title) == "" {
-		title = key
-	} else {
-		title = fmt.Sprintf("%s [%s]", title, key)
+func formatNodeTitle(kind, title, key string, isFocused bool, style lipgloss.Style) string {
+	title = strings.TrimSpace(title)
+	key = strings.TrimSpace(strings.ToUpper(key))
+	var prefix string
+	switch kind {
+	case "Epic":
+		prefix = epicStyle.Render("(Epic)")
+	case "Task":
+		prefix = taskStyle.Render("(Task)")
+	case "Subtask":
+		prefix = subtaskStyle.Render("(Subtask)")
 	}
-
+	var desc string
 	if isFocused {
-		return focusedStyle.Render(title + " [FOCUSED]")
+		desc = descStyle.Render(title)
+	} else {
+		desc = whiteStyle.Render(title)
 	}
-	return style.Render(title)
+	label := fmt.Sprintf("%s %s [%s]", prefix, desc, key)
+	if isFocused {
+		return focusedStyle.Render(label + " [FOCUSED]")
+	}
+	// Dim non-focused items
+	return dimStyle.Render(label)
 }
