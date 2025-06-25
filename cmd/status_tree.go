@@ -133,19 +133,20 @@ func formatNodeTitle(kind, title, key string, isFocused bool, style lipgloss.Sty
 	var prefix string
 	switch kind {
 	case "Epic":
-		prefix = epicStyle.Render("(Epic)")
+		prefix = epicStyle.Render("Epic")
 	case "Task":
-		prefix = taskStyle.Render("(Task)")
+		prefix = taskStyle.Render("Task")
 	case "Subtask":
-		prefix = subtaskStyle.Render("(Subtask)")
+		prefix = subtaskStyle.Render("Subtask")
 	}
+	keyPart := fmt.Sprintf("[%s]", key)
 	var desc string
 	if isFocused {
 		desc = descStyle.Render(title)
 	} else {
 		desc = whiteStyle.Render(title)
 	}
-	label := fmt.Sprintf("%s %s [%s]", prefix, desc, key)
+	label := fmt.Sprintf("%s %s: %s", prefix, keyPart, desc)
 	if isFocused {
 		return focusedStyle.Render(label + " [FOCUSED]")
 	}
