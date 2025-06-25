@@ -25,6 +25,7 @@ then enriches the content with AI, and optionally creates a Jira ticket.
 
 Examples:
   jai task                    # Create new task under current epic
+  jai task --orphan           # Create parentless task (no epic)
   jai task --no-enrich        # Skip AI enrichment
   jai task --no-create        # Skip Jira ticket creation`,
 	RunE: runTask,
@@ -33,11 +34,13 @@ Examples:
 var (
 	noEnrich bool
 	noCreate bool
+	orphan   bool
 )
 
 func init() {
 	taskCmd.Flags().BoolVar(&noEnrich, "no-enrich", false, "Skip AI enrichment")
 	taskCmd.Flags().BoolVar(&noCreate, "no-create", false, "Skip Jira ticket creation")
+	taskCmd.Flags().BoolVarP(&orphan, "orphan", "o", false, "Create task without parent epic")
 	rootCmd.AddCommand(taskCmd)
 }
 
@@ -58,14 +61,22 @@ func runTask(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load context: %w", err)
 	}
 
-	// Check if we have an epic context
-	if !ctxManager.HasEpic() {
-		return fmt.Errorf("no epic context set. Use 'jai epic <key|title>' first")
-	}
+	var epicKey string
+	var currentCtx *types.Context
 
-	// Get current context
-	currentCtx := ctxManager.Get()
-	epicKey := currentCtx.EpicKey
+	// Check epic context only if not creating an orphan task
+	if !orphan {
+		// Check if we have an epic context
+		if !ctxManager.HasEpic() {
+			return fmt.Errorf("no epic context set. Use 'jai epic <key|title>' first, or use --orphan to create a parentless task")
+		}
+		// Get current context
+		currentCtx = ctxManager.Get()
+		epicKey = currentCtx.EpicKey
+	} else {
+		// For orphan tasks, create a minimal context
+		currentCtx = &types.Context{}
+	}
 
 	// Initialize parser
 	parser := markdown.NewParser(dataDir)
@@ -86,7 +97,7 @@ func runTask(cmd *cobra.Command, args []string) error {
 		Type:       types.TicketTypeTask,
 		Title:      extractTitleFromContent(rawContent),
 		RawContent: rawContent,
-		EpicKey:    epicKey,
+		EpicKey:    epicKey, // Will be empty for orphan tasks
 		Created:    time.Now(),
 		Updated:    time.Now(),
 		Assignee:   viper.GetString("jira.username"),
@@ -160,13 +171,17 @@ func runTask(cmd *cobra.Command, args []string) error {
 			fmt.Printf("Focused on task: %s [%s]\n", task.Title, task.Key)
 		}
 	} else {
-		// If no Jira key, we can't set focus yet, but we can update the epic context
+		// If no Jira key, handle focus differently for orphan vs epic tasks
 		if task.EpicKey != "" {
+			// Task has an epic, update the epic context
 			if err := ctxManager.SetEpic(task.EpicKey, ""); err != nil {
 				fmt.Printf("Warning: Failed to set epic focus: %v\n", err)
 			} else {
 				fmt.Printf("Task created under epic: %s\n", task.EpicKey)
 			}
+		} else {
+			// Orphan task without Jira key - just confirm creation
+			fmt.Printf("Orphan task created: %s\n", task.Title)
 		}
 	}
 
@@ -325,7 +340,7 @@ func createTaskFile(parser *markdown.Parser, taskFilePath string, task *types.Ti
 func generateTaskMarkdown(task *types.Ticket) string {
 	var lines []string
 
-	// Add epic reference at the top
+	// Add epic reference at the top only if task has an epic
 	if task.EpicKey != "" {
 		lines = append(lines, fmt.Sprintf("**Epic:** [%s](%s.md)", task.EpicKey, task.EpicKey))
 		lines = append(lines, "")

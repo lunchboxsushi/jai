@@ -23,12 +23,21 @@ var focusCmd = &cobra.Command{
 Examples:
   jai focus "observability"     # Focus on epic/task containing "observability"
   jai focus "SRE-1234"          # Focus on specific ticket by key
-  jai focus                     # Show current focus`,
+  jai focus                     # Show interactive epic selection
+  jai focus --task              # Start at task level (skip epics)
+  jai focus --subtask           # Start at subtask level (skip epics/tasks)`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runFocus,
 }
 
+var (
+	focusTask    bool
+	focusSubtask bool
+)
+
 func init() {
+	focusCmd.Flags().BoolVarP(&focusTask, "task", "t", false, "Start interactive selection at task level")
+	focusCmd.Flags().BoolVar(&focusSubtask, "subtask", false, "Start interactive selection at subtask level")
 	rootCmd.AddCommand(focusCmd)
 }
 
@@ -49,9 +58,15 @@ func runFocus(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load context: %w", err)
 	}
 
-	// If no args provided, show interactive epic/task selection
+	// If no args provided, show interactive selection based on flags
 	if len(args) == 0 {
-		return interactiveFocus(ctxManager, dataDir)
+		if focusSubtask {
+			return interactiveFocusSubtasks(ctxManager, dataDir)
+		} else if focusTask {
+			return interactiveFocusTasks(ctxManager, dataDir)
+		} else {
+			return interactiveFocus(ctxManager, dataDir)
+		}
 	}
 
 	query := args[0]
@@ -472,4 +487,135 @@ func isJiraKey(s string) bool {
 	// Simple regex for PROJECT-123 format
 	re := regexp.MustCompile(`^[A-Z]+-\d+$`)
 	return re.MatchString(s)
+}
+
+// interactiveFocusTasks provides direct task selection (including orphan tasks)
+func interactiveFocusTasks(ctxManager *context.Manager, dataDir string) error {
+	parser := markdown.NewParser(dataDir)
+	ticketsDir := filepath.Join(dataDir, "tickets")
+
+	// List all tasks (including orphan tasks)
+	tasks, err := listAllTasks(parser, ticketsDir)
+	if err != nil {
+		return fmt.Errorf("failed to list tasks: %w", err)
+	}
+	if len(tasks) == 0 {
+		return fmt.Errorf("no tasks found")
+	}
+
+	fmt.Println("Select a task:")
+	for i, task := range tasks {
+		epicInfo := ""
+		if task.EpicKey != "" {
+			epicInfo = fmt.Sprintf(" (Epic: %s)", task.EpicKey)
+		} else {
+			epicInfo = " (Orphan)"
+		}
+		fmt.Printf("%d. %s [%s]%s\n", i+1, parser.RemoveJiraKey(task.Title), task.Key, epicInfo)
+	}
+	fmt.Print("Enter number (or blank to cancel): ")
+	selectedIdx := readNumber(len(tasks))
+	if selectedIdx == -1 {
+		fmt.Println("Cancelled.")
+		return nil
+	}
+
+	task := tasks[selectedIdx]
+	return setTicketContext(ctxManager, parser, task)
+}
+
+// interactiveFocusSubtasks provides direct subtask selection
+func interactiveFocusSubtasks(ctxManager *context.Manager, dataDir string) error {
+	parser := markdown.NewParser(dataDir)
+	ticketsDir := filepath.Join(dataDir, "tickets")
+
+	// List all subtasks
+	subtasks, err := listAllSubtasks(parser, ticketsDir)
+	if err != nil {
+		return fmt.Errorf("failed to list subtasks: %w", err)
+	}
+	if len(subtasks) == 0 {
+		return fmt.Errorf("no subtasks found")
+	}
+
+	fmt.Println("Select a subtask:")
+	for i, subtask := range subtasks {
+		parentInfo := ""
+		if subtask.ParentKey != "" {
+			parentInfo = fmt.Sprintf(" (Task: %s)", subtask.ParentKey)
+		}
+		if subtask.EpicKey != "" {
+			if parentInfo != "" {
+				parentInfo += fmt.Sprintf(", Epic: %s", subtask.EpicKey)
+			} else {
+				parentInfo = fmt.Sprintf(" (Epic: %s)", subtask.EpicKey)
+			}
+		}
+		fmt.Printf("%d. %s [%s]%s\n", i+1, parser.RemoveJiraKey(subtask.Title), subtask.Key, parentInfo)
+	}
+	fmt.Print("Enter number (or blank to cancel): ")
+	selectedIdx := readNumber(len(subtasks))
+	if selectedIdx == -1 {
+		fmt.Println("Cancelled.")
+		return nil
+	}
+
+	subtask := subtasks[selectedIdx]
+	return setTicketContext(ctxManager, parser, subtask)
+}
+
+// listAllTasks returns all tasks from all markdown files (including orphan tasks)
+func listAllTasks(parser *markdown.Parser, ticketsDir string) ([]types.Ticket, error) {
+	var tasks []types.Ticket
+	files, err := os.ReadDir(ticketsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return tasks, nil
+		}
+		return nil, err
+	}
+	for _, file := range files {
+		if file.IsDir() || !isMarkdownFile(file.Name()) {
+			continue
+		}
+		filePath := filepath.Join(ticketsDir, file.Name())
+		mdFile, err := parser.ParseFile(filePath)
+		if err != nil {
+			continue
+		}
+		for _, ticket := range mdFile.Tickets {
+			if ticket.Type == types.TicketTypeTask {
+				tasks = append(tasks, ticket)
+			}
+		}
+	}
+	return tasks, nil
+}
+
+// listAllSubtasks returns all subtasks from all markdown files
+func listAllSubtasks(parser *markdown.Parser, ticketsDir string) ([]types.Ticket, error) {
+	var subtasks []types.Ticket
+	files, err := os.ReadDir(ticketsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return subtasks, nil
+		}
+		return nil, err
+	}
+	for _, file := range files {
+		if file.IsDir() || !isMarkdownFile(file.Name()) {
+			continue
+		}
+		filePath := filepath.Join(ticketsDir, file.Name())
+		mdFile, err := parser.ParseFile(filePath)
+		if err != nil {
+			continue
+		}
+		for _, ticket := range mdFile.Tickets {
+			if ticket.Type == types.TicketTypeSubtask {
+				subtasks = append(subtasks, ticket)
+			}
+		}
+	}
+	return subtasks, nil
 }
