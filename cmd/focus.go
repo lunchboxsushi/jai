@@ -447,8 +447,3 @@ func isJiraKey(s string) bool {
 	re := regexp.MustCompile(`^[A-Z]+-\d+$`)
 	return re.MatchString(s)
 }
-
-// isMarkdownFile checks if a file is a markdown file
-func isMarkdownFile(filename string) bool {
-	return strings.HasSuffix(filename, ".md")
-}

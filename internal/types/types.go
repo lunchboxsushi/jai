@@ -6,11 +6,13 @@ import (
 
 // Context represents the current working context (epic/task focus)
 type Context struct {
-	EpicKey string    `json:"epic_key,omitempty"`
-	EpicID  string    `json:"epic_id,omitempty"`
-	TaskKey string    `json:"task_key,omitempty"`
-	TaskID  string    `json:"task_id,omitempty"`
-	Updated time.Time `json:"updated"`
+	EpicKey    string    `json:"epic_key,omitempty"`
+	EpicID     string    `json:"epic_id,omitempty"`
+	TaskKey    string    `json:"task_key,omitempty"`
+	TaskID     string    `json:"task_id,omitempty"`
+	SubtaskKey string    `json:"subtask_key,omitempty"`
+	SubtaskID  string    `json:"subtask_id,omitempty"`
+	Updated    time.Time `json:"updated"`
 }
 
 // Ticket represents a Jira ticket (epic, task, or sub-task)

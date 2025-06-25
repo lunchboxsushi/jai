@@ -77,6 +77,8 @@ func (m *Manager) SetEpic(key, id string) error {
 	m.context.EpicID = id
 	m.context.TaskKey = "" // Clear task context when switching epics
 	m.context.TaskID = ""
+	m.context.SubtaskKey = ""
+	m.context.SubtaskID = ""
 	return m.Save()
 }
 
@@ -86,6 +88,8 @@ func (m *Manager) SetEpicAndTask(epicKey, epicID, taskKey, taskID string) error 
 	m.context.EpicID = epicID
 	m.context.TaskKey = taskKey
 	m.context.TaskID = taskID
+	m.context.SubtaskKey = ""
+	m.context.SubtaskID = ""
 	return m.Save()
 }
 
@@ -93,6 +97,26 @@ func (m *Manager) SetEpicAndTask(epicKey, epicID, taskKey, taskID string) error 
 func (m *Manager) SetTask(key, id string) error {
 	m.context.TaskKey = key
 	m.context.TaskID = id
+	m.context.SubtaskKey = ""
+	m.context.SubtaskID = ""
+	return m.Save()
+}
+
+// SetSubtask sets the current subtask context
+func (m *Manager) SetSubtask(key, id string) error {
+	m.context.SubtaskKey = key
+	m.context.SubtaskID = id
+	return m.Save()
+}
+
+// SetFullContext sets the entire context in one go.
+func (m *Manager) SetFullContext(epicKey, epicID, taskKey, taskID, subtaskKey, subtaskID string) error {
+	m.context.EpicKey = epicKey
+	m.context.EpicID = epicID
+	m.context.TaskKey = taskKey
+	m.context.TaskID = taskID
+	m.context.SubtaskKey = subtaskKey
+	m.context.SubtaskID = subtaskID
 	return m.Save()
 }
 
@@ -102,6 +126,8 @@ func (m *Manager) Clear() error {
 	m.context.EpicID = ""
 	m.context.TaskKey = ""
 	m.context.TaskID = ""
+	m.context.SubtaskKey = ""
+	m.context.SubtaskID = ""
 	return m.Save()
 }
 
@@ -115,6 +141,11 @@ func (m *Manager) HasTask() bool {
 	return m.context.TaskKey != ""
 }
 
+// HasSubtask returns true if a subtask is set
+func (m *Manager) HasSubtask() bool {
+	return m.context.SubtaskKey != ""
+}
+
 // GetEpicKey returns the current epic key
 func (m *Manager) GetEpicKey() string {
 	return m.context.EpicKey
@@ -123,6 +154,11 @@ func (m *Manager) GetEpicKey() string {
 // GetTaskKey returns the current task key
 func (m *Manager) GetTaskKey() string {
 	return m.context.TaskKey
+}
+
+// GetSubtaskKey returns the current subtask key
+func (m *Manager) GetSubtaskKey() string {
+	return m.context.SubtaskKey
 }
 
 // String returns a string representation of the current context
@@ -140,6 +176,12 @@ func (m *Manager) String() string {
 			result += " → "
 		}
 		result += fmt.Sprintf("Task: %s", m.context.TaskKey)
+	}
+	if m.context.SubtaskKey != "" {
+		if result != "" {
+			result += " → "
+		}
+		result += fmt.Sprintf("Subtask: %s", m.context.SubtaskKey)
 	}
 
 	return result
