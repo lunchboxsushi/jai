@@ -43,16 +43,34 @@ func renderStatusTree(ctxManager *context.Manager) error {
 	parser := markdown.NewParser(dataDir)
 	currentCtx := ctxManager.Get()
 
-	if !ctxManager.HasEpic() {
-		fmt.Println("No epic in context. Use 'jai focus <epic-key>' to set one.")
-		return nil
-	}
-
+	// Get all tickets
 	allTickets, err := findAllTickets(dataDir, parser)
 	if err != nil {
 		return err
 	}
 
+	if len(allTickets) == 0 {
+		fmt.Println("No tickets found.")
+		return nil
+	}
+
+	// If we have an epic context, show the epic-centric view
+	if ctxManager.HasEpic() {
+		return renderEpicCentricView(allTickets, currentCtx, parser)
+	}
+
+	// If we have a task context (orphan task), show the task-centric view
+	if ctxManager.HasTask() {
+		return renderTaskCentricView(allTickets, currentCtx, parser)
+	}
+
+	// No context set
+	fmt.Println("No context set. Use 'jai focus <query>' to set focus.")
+	return nil
+}
+
+// renderEpicCentricView renders the traditional epic-centered tree view
+func renderEpicCentricView(allTickets []types.Ticket, currentCtx *types.Context, parser *markdown.Parser) error {
 	var rootEpic *types.Ticket
 	for i, t := range allTickets {
 		if t.Key == currentCtx.EpicKey {
@@ -73,7 +91,45 @@ func renderStatusTree(ctxManager *context.Manager) error {
 	treeRoot.Enumerator(treepkg.RoundedEnumerator)
 
 	fmt.Println(treeRoot.String())
+	return nil
+}
 
+// renderTaskCentricView renders a task-centered view for orphan tasks
+func renderTaskCentricView(allTickets []types.Ticket, currentCtx *types.Context, parser *markdown.Parser) error {
+	var focusedTask *types.Ticket
+	for i, t := range allTickets {
+		if t.Key == currentCtx.TaskKey && t.Type == types.TicketTypeTask {
+			focusedTask = &allTickets[i]
+			break
+		}
+	}
+
+	if focusedTask == nil {
+		fmt.Printf("Focused task '%s' not found in any markdown file.\n", currentCtx.TaskKey)
+		return nil
+	}
+
+	// Build a simple tree with the focused task and its subtasks
+	isTaskFocused := currentCtx.TaskKey == focusedTask.Key && currentCtx.SubtaskKey == ""
+	taskTitle := formatNodeTitle("Task", parser.RemoveJiraKey(focusedTask.Title), focusedTask.Key, isTaskFocused, taskStyle)
+
+	// Add orphan indicator if no epic
+	if focusedTask.EpicKey == "" {
+		taskTitle = "🏴‍☠️ " + taskTitle
+	}
+
+	taskTree := treepkg.New().Root(taskTitle)
+	taskTree.Enumerator(treepkg.RoundedEnumerator)
+
+	// Find subtasks for this task
+	subtasks := findChildSubtasks(focusedTask.Key, allTickets)
+	for _, subtask := range subtasks {
+		isSubtaskFocused := currentCtx.SubtaskKey == subtask.Key
+		subtaskTitle := formatNodeTitle("Subtask", parser.RemoveJiraKey(subtask.Title), subtask.Key, isSubtaskFocused, subtaskStyle)
+		taskTree.Child(subtaskTitle)
+	}
+
+	fmt.Println(taskTree.String())
 	return nil
 }
 

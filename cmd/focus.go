@@ -443,6 +443,10 @@ func setTicketContext(ctxManager *context.Manager, parser *markdown.Parser, tick
 				return fmt.Errorf("failed to set epic and task context: %w", err)
 			}
 		} else {
+			// For orphan tasks, clear all context first, then set only the task
+			if err := ctxManager.Clear(); err != nil {
+				return fmt.Errorf("failed to clear context: %w", err)
+			}
 			if err := ctxManager.SetTask(ticket.Key, ticket.ID); err != nil {
 				return fmt.Errorf("failed to set task context: %w", err)
 			}

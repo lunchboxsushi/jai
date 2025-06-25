@@ -180,8 +180,16 @@ func runTask(cmd *cobra.Command, args []string) error {
 				fmt.Printf("Task created under epic: %s\n", task.EpicKey)
 			}
 		} else {
-			// Orphan task without Jira key - just confirm creation
-			fmt.Printf("Orphan task created: %s\n", task.Title)
+			// Orphan task without Jira key - set task context with generated key or title
+			taskKey := task.Key
+			if taskKey == "" {
+				taskKey = generateTaskKey(task.Title)
+			}
+			if err := ctxManager.SetTask(taskKey, task.ID); err != nil {
+				fmt.Printf("Warning: Failed to set task focus: %v\n", err)
+			} else {
+				fmt.Printf("Orphan task created and focused: %s\n", task.Title)
+			}
 		}
 	}
 
