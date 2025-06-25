@@ -8,7 +8,7 @@ A CLI-first, markdown-native workflow tool for managing Jira tickets with speed,
 
 * Lets developers write tasks and sub-tasks in markdown
 * Auto-enriches raw task descriptions into manager-optimized Jira tickets
-* Tracks current working context (epic, task) for seamless sub-task creation
+* Tracks current working context (epic, task, subtask) for seamless sub-task creation
 * Syncs local markdown files with Jira to reflect status, updates, and structure
 * Eliminates click-heavy Jira workflows
 * Prioritizes **speed and flow** — minimal typing, no context switching, keyboard-native
@@ -41,41 +41,42 @@ jai config init
 ```bash
 # 1. Create a new epic
 jai epic
-# ... an editor opens to draft the epic.
-# After saving, the epic is enriched by AI and a Jira ticket is created.
+# ... an editor opens to draft the epic. Save and close when done.
+# The epic is enriched by AI, reviewed, and a Jira ticket is created.
+# Context is set to this epic.
 
-# 2. Or, focus on an existing epic
-jai focus "Name of my epic" # Fuzzy match on title
-jai focus "SRE-1234"       # Exact match on key
-
-# 3. Create a new task under the current epic
+# 2. Create a new task under the current epic
 jai task
-# ... editor opens, AI enriches, Jira ticket created, and focus is set.
+# ... editor opens, add info/title, save and close.
+# AI enriches, Jira ticket is created, and context is set to this task.
 
-# 4. Create a new sub-task
+# 3. Create a new sub-task under the current task
 jai subtask
-# ... same workflow, linked to the parent task.
+# ... editor opens, add info/title, save and close.
+# AI enriches, Jira ticket is created, and context is set to this subtask.
+
+# 4. Focus on an existing epic, task, or subtask
+jai focus "SRE-1234"       # Fuzzy match on key or title, e.g jai focus "1234" 
+
+# 5. Check your current context
+jai status
 ```
 
-## 🔁 Workflow Summary
+## 🔄 Workflow Summary
 
-The core workflow is designed to be fast and seamless. The `epic`, `task`, and `subtask` commands handle the entire lifecycle from drafting to Jira creation.
+The core workflow is designed for speed and minimal friction. The `epic`, `task`, and `subtask` commands handle the entire lifecycle from drafting to Jira creation, with context automatically updated for you.
 
-### Starting Work
+### Typical Flow for New Work
 
-```bash
-# To work on a new feature, start by creating an epic:
-jai epic
+1. `jai epic` — Draft a new epic in your editor.
+2. Add info and title, then save and close the editor.
+3. The epic is AI-enriched and reviewed (if enabled).
+4. A Jira ticket is created for the epic.
+5. Context is set to this epic (for status/focus).
 
-# To work on an existing epic, focus it first:
-jai focus "SRE-1234"
+Repeat the same process for `jai task` (under the current epic) and `jai subtask` (under the current task).
 
-# With an epic in context, create a task:
-jai task
-
-# With a task in context, create a sub-task:
-jai subtask
-```
+> **Note:** Most developers primarily create and work on subtasks, as tasks and epics are often owned at a higher level.
 
 ### Disabling AI Enrichment or Jira Creation
 
@@ -101,21 +102,21 @@ jai status
 
 ### Core Commands
 
-- `epic` - Create a new epic. Opens an editor for drafting, enriches with AI, and creates a Jira ticket.
-- `task` - Create a new task under the current epic. Follows the same draft -> enrich -> create workflow.
-- `subtask` - Create a new sub-task under the current task.
+- `epic` - Create a new epic. Opens an editor for drafting, enriches with AI, and creates a Jira ticket. **No arguments.**
+- `task` - Create a new task under the current epic. Same workflow. **No arguments.**
+- `subtask` - Create a new sub-task under the current task. **No arguments.**
 
 ### Context Management
 
-- `focus <query>` - Set current context by fuzzy-matching an epic/task title or key.
-- `status` - Show the current focused epic and/or task.
+- `focus <query>` - Set current context by fuzzy-matching an epic, task, or subtask title or key.
+- `status` - Show the current focused epic, task, and subtask.
 
 ### Configuration
 
 - `config init` - Initialize a new configuration file.
 - `config show` - Show the current configuration.
 
-## �� Project Structure
+## 🗂️ Project Structure
 
 ```text
 ~/.local/share/jai/
@@ -125,7 +126,7 @@ jai status
 │   ├── inbox.md                       # Quick capture area
 │   └── _archive/                      # Closed/deprecated tickets
 │       └── 2024-old-epic.md
-├── current.json                       # Current epic/task focus
+├── current.json                       # Current epic/task/subtask focus
 ├── config.json                        # Config options (e.g. reviewBeforeCreate)
 └── templates/
     ├── default_epic.md
@@ -150,6 +151,93 @@ Task description with acceptance criteria...
 
 Subtask details and implementation notes...
 ```
+
+## 🕵️ Review Page Example
+
+Before a Jira ticket is created (if review is enabled), you'll see a review page like this in your editor:
+
+**Epic Review Example:**
+```markdown
+# Review Epic Before Creating Jira Ticket
+
+File: /path/to/OBS-123-Observability-Refactor.md
+
+## Epic Content to be Created:
+### Title
+Observability Refactor
+
+### Content
+Epic description and context...
+
+---
+Review the epic above. The epic will be added to the file and a Jira epic will be created.
+Save and exit to proceed, or delete all content to cancel.
+```
+
+**Task Review Example:**
+```markdown
+# Review Task Before Creating Jira Ticket
+
+File: /path/to/OBS-456-Implement-distributed-tracing.md
+
+## Task Content to be Created:
+### Title
+Implement distributed tracing
+
+### Content
+Task description with acceptance criteria...
+
+---
+Review the task above. The task will be created as a separate file and a Jira ticket will be created.
+Save and exit to proceed, or delete all content to cancel.
+```
+
+**Subtask Review Example:**
+```markdown
+# Review Subtask Before Creating Jira Ticket
+
+File: /path/to/OBS-457-Set-up-Jaeger.md
+
+## Subtask Content to be Created:
+### Title
+Set up Jaeger
+
+### Content
+Subtask details and implementation notes...
+
+### Parent Task
+OBS-456
+
+---
+Review the subtask above. The subtask will be created as a separate file and a Jira ticket will be created.
+Save and exit to proceed, or delete all content to cancel.
+```
+
+## 🏷️ Metadata Section
+
+Each ticket in a markdown file can include a metadata section to track important fields. This section appears after the ticket content and looks like this:
+
+```markdown
+---
+*Metadata:*
+- Key: OBS-123
+- Status: In Progress
+- Priority: High
+- EpicKey: OBS-123         # For tasks, links to the parent epic
+- ParentKey: OBS-456       # For subtasks, links to the parent task
+- TaskKey: OBS-456         # (Alternative for subtasks, links to parent task)
+---
+```
+
+**Metadata keys:**
+- `Key`: The Jira key for this ticket (e.g., OBS-123)
+- `Status`: The current status (e.g., To Do, In Progress, Done)
+- `Priority`: Ticket priority (e.g., High, Medium, Low)
+- `EpicKey`: For tasks, the parent epic's key
+- `ParentKey`: For tasks, the parent epic; for subtasks, the parent task
+- `TaskKey`: For subtasks, the parent task (alternative to ParentKey)
+
+> The metadata section is used by JAI to track the full ticket hierarchy and sync with Jira. You can edit these fields manually if needed, but they are usually managed automatically.
 
 ## ⚙️ Configuration
 
@@ -186,7 +274,7 @@ export JAI_JIRA_TOKEN="your-api-token"
 export JAI_AI_API_KEY="your-openai-api-key"
 ```
 
-## 🛠 Development
+## 🛠️ Development
 
 ### Prerequisites
 
@@ -198,41 +286,8 @@ export JAI_AI_API_KEY="your-openai-api-key"
 
 ```bash
 # Build for current platform
-go build -o jai cmd/jai/main.go
-
-# Build for specific platform
-GOOS=linux GOARCH=amd64 go build -o jai-linux cmd/jai/main.go
-GOOS=darwin GOARCH=amd64 go build -o jai-mac cmd/jai/main.go
-```
-
-### Project Structure
-
-```
-jai/
-├── cmd/
-│   ├── jai/
-│   │   └── main.go          # Entry point
-│   ├── root.go              # Root command
-│   ├── epic.go              # Epic command
-│   ├── task.go              # Task command
-│   ├── subtask.go           # Subtask command
-│   ├── focus.go             # Focus command
-│   ├── new.go               # New command
-│   ├── config.go            # Config command
-│   └── status.go            # Status command
-├── internal/
-│   ├── types/
-│   │   └── types.go         # Core data structures
-│   ├── context/
-│   │   └── manager.go       # Context management
-│   ├── markdown/
-│   │   └── parser.go        # Markdown parsing
-│   ├── ai/
-│   │   └── enrichment.go    # AI enrichment
-│   └── jira/
-│       └── client.go        # Jira integration
-├── go.mod                   # Go module
-└── README.md               # This file
+# (from project root)
+go install ./cmd/jai
 ```
 
 ## 🤝 Contributing
@@ -254,11 +309,8 @@ MIT License - see LICENSE file for details.
 - [ ] Interactive ticket selection
 - [ ] More AI providers (Anthropic, etc.)
 - [ ] Webhook support for real-time sync
-- [ ] Team collaboration features
 - [ ] Advanced markdown templates
 - [ ] CLI completion scripts
-- [ ] Docker support
-- [ ] CI/CD pipeline
 
 ## 🙏 Acknowledgments
 

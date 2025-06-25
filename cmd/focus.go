@@ -154,13 +154,26 @@ func interactiveFocus(ctxManager *context.Manager, dataDir string) error {
 			if err := ctxManager.SetEpicAndTask(ticket.EpicKey, "", ticket.ParentKey, ""); err != nil {
 				return fmt.Errorf("failed to set epic and task context: %w", err)
 			}
+			if err := ctxManager.SetSubtask(ticket.Key, ticket.ID); err != nil {
+				return fmt.Errorf("failed to set subtask context: %w", err)
+			}
 		} else if ticket.EpicKey != "" {
 			if err := ctxManager.SetEpic(ticket.EpicKey, ""); err != nil {
 				return fmt.Errorf("failed to set epic context: %w", err)
 			}
+			if err := ctxManager.SetSubtask(ticket.Key, ticket.ID); err != nil {
+				return fmt.Errorf("failed to set subtask context: %w", err)
+			}
 		} else if ticket.ParentKey != "" {
 			if err := ctxManager.SetTask(ticket.ParentKey, ""); err != nil {
 				return fmt.Errorf("failed to set task context: %w", err)
+			}
+			if err := ctxManager.SetSubtask(ticket.Key, ticket.ID); err != nil {
+				return fmt.Errorf("failed to set subtask context: %w", err)
+			}
+		} else {
+			if err := ctxManager.SetSubtask(ticket.Key, ticket.ID); err != nil {
+				return fmt.Errorf("failed to set subtask context: %w", err)
 			}
 		}
 		fmt.Printf("Focused on subtask: %s [%s]\n", parser.RemoveJiraKey(ticket.Title), ticket.Key)
@@ -426,13 +439,26 @@ func setTicketContext(ctxManager *context.Manager, parser *markdown.Parser, tick
 			if err := ctxManager.SetEpicAndTask(ticket.EpicKey, "", ticket.ParentKey, ""); err != nil {
 				return fmt.Errorf("failed to set epic and task context: %w", err)
 			}
+			if err := ctxManager.SetSubtask(ticket.Key, ticket.ID); err != nil {
+				return fmt.Errorf("failed to set subtask context: %w", err)
+			}
 		} else if ticket.EpicKey != "" {
 			if err := ctxManager.SetEpic(ticket.EpicKey, ""); err != nil {
 				return fmt.Errorf("failed to set epic context: %w", err)
 			}
+			if err := ctxManager.SetSubtask(ticket.Key, ticket.ID); err != nil {
+				return fmt.Errorf("failed to set subtask context: %w", err)
+			}
 		} else if ticket.ParentKey != "" {
 			if err := ctxManager.SetTask(ticket.ParentKey, ""); err != nil {
 				return fmt.Errorf("failed to set task context: %w", err)
+			}
+			if err := ctxManager.SetSubtask(ticket.Key, ticket.ID); err != nil {
+				return fmt.Errorf("failed to set subtask context: %w", err)
+			}
+		} else {
+			if err := ctxManager.SetSubtask(ticket.Key, ticket.ID); err != nil {
+				return fmt.Errorf("failed to set subtask context: %w", err)
 			}
 		}
 		fmt.Printf("Focused on subtask: %s [%s]\n", parser.RemoveJiraKey(ticket.Title), ticket.Key)
