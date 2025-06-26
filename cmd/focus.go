@@ -245,7 +245,7 @@ func listTasksForEpic(parser *markdown.Parser, ticketsDir string, epicKey string
 			continue
 		}
 		for _, ticket := range mdFile.Tickets {
-			if ticket.Type == types.TicketTypeTask {
+			if ticket.Type == types.TicketTypeTask || ticket.Type == types.TicketTypeSpike {
 				// Check both EpicKey and ParentKey (for backward compatibility)
 				ticketEpicKey := strings.TrimSpace(strings.ToUpper(ticket.EpicKey))
 				if ticketEpicKey == epicKeyNorm {
@@ -436,14 +436,14 @@ func setTicketContext(ctxManager *context.Manager, parser *markdown.Parser, tick
 			return fmt.Errorf("failed to set epic context: %w", err)
 		}
 		fmt.Printf("Focused on epic: %s [%s]\n", parser.RemoveJiraKey(ticket.Title), ticket.Key)
-	case types.TicketTypeTask:
-		// For tasks, set both epic and task context if epic is available
+	case types.TicketTypeTask, types.TicketTypeSpike:
+		// For tasks and spikes, set both epic and task context if epic is available
 		if ticket.EpicKey != "" {
 			if err := ctxManager.SetEpicAndTask(ticket.EpicKey, "", ticket.Key, ticket.ID); err != nil {
 				return fmt.Errorf("failed to set epic and task context: %w", err)
 			}
 		} else {
-			// For orphan tasks, clear all context first, then set only the task
+			// For orphan tasks/spikes, clear all context first, then set only the task
 			if err := ctxManager.Clear(); err != nil {
 				return fmt.Errorf("failed to clear context: %w", err)
 			}
@@ -451,7 +451,11 @@ func setTicketContext(ctxManager *context.Manager, parser *markdown.Parser, tick
 				return fmt.Errorf("failed to set task context: %w", err)
 			}
 		}
-		fmt.Printf("Focused on task: %s [%s]\n", parser.RemoveJiraKey(ticket.Title), ticket.Key)
+		ticketTypeName := "task"
+		if ticket.Type == types.TicketTypeSpike {
+			ticketTypeName = "spike"
+		}
+		fmt.Printf("Focused on %s: %s [%s]\n", ticketTypeName, parser.RemoveJiraKey(ticket.Title), ticket.Key)
 	case types.TicketTypeSubtask:
 		// For subtasks, set epic, task, and subtask context
 		if ticket.EpicKey != "" && ticket.ParentKey != "" {
@@ -588,7 +592,7 @@ func listAllTasks(parser *markdown.Parser, ticketsDir string) ([]types.Ticket, e
 			continue
 		}
 		for _, ticket := range mdFile.Tickets {
-			if ticket.Type == types.TicketTypeTask {
+			if ticket.Type == types.TicketTypeTask || ticket.Type == types.TicketTypeSpike {
 				tasks = append(tasks, ticket)
 			}
 		}

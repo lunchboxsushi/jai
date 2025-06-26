@@ -188,6 +188,16 @@ func (c *Client) convertJiraIssue(issue *jira.Issue) *types.Ticket {
 		Updated:     time.Time(issue.Fields.Updated),
 	}
 
+	// Set assignee
+	if issue.Fields.Assignee != nil {
+		ticket.Assignee = issue.Fields.Assignee.DisplayName
+	}
+
+	// Set reporter
+	if issue.Fields.Reporter != nil {
+		ticket.Reporter = issue.Fields.Reporter.DisplayName
+	}
+
 	// Determine ticket type
 	switch issue.Fields.Type.Name {
 	case "Epic":
@@ -197,6 +207,8 @@ func (c *Client) convertJiraIssue(issue *jira.Issue) *types.Ticket {
 		if issue.Fields.Parent != nil {
 			ticket.ParentKey = issue.Fields.Parent.Key
 		}
+	case "Spike":
+		ticket.Type = types.TicketTypeSpike
 	default:
 		ticket.Type = types.TicketTypeTask
 	}
@@ -228,6 +240,8 @@ func (c *Client) getIssueTypeName(ticketType types.TicketType) string {
 		return "Epic"
 	case types.TicketTypeSubtask:
 		return "Sub-task"
+	case types.TicketTypeSpike:
+		return "Spike"
 	default:
 		return "Task"
 	}

@@ -185,7 +185,8 @@ func (p *Parser) isTicketHeader(line string) bool {
 	line = strings.TrimSpace(line)
 	return strings.HasPrefix(line, "# epic:") ||
 		strings.HasPrefix(line, "## task:") ||
-		strings.HasPrefix(line, "### subtask:")
+		strings.HasPrefix(line, "### subtask:") ||
+		strings.HasPrefix(line, "#### spike:")
 }
 
 // parseTicketHeader parses a ticket header line
@@ -206,6 +207,9 @@ func (p *Parser) parseTicketHeader(line string, lineNum int) *types.Ticket {
 	} else if strings.HasPrefix(line, "### subtask:") {
 		ticket.Type = types.TicketTypeSubtask
 		ticket.Title = strings.TrimSpace(strings.TrimPrefix(line, "### subtask:"))
+	} else if strings.HasPrefix(line, "#### spike:") {
+		ticket.Type = types.TicketTypeSpike
+		ticket.Title = strings.TrimSpace(strings.TrimPrefix(line, "#### spike:"))
 	}
 
 	// Extract Jira key if present
@@ -300,6 +304,8 @@ func (p *Parser) generateHeader(ticket types.Ticket) string {
 		prefix = "## task: "
 	case types.TicketTypeSubtask:
 		prefix = "### subtask: "
+	case types.TicketTypeSpike:
+		prefix = "#### spike: "
 	}
 
 	title := ticket.Title
@@ -337,6 +343,11 @@ func (p *Parser) GetTaskFilePath(taskKey string) string {
 // GetInboxFilePath returns the path to the inbox file
 func (p *Parser) GetInboxFilePath() string {
 	return filepath.Join(p.dataDir, "tickets", "inbox.md")
+}
+
+// GetTicketsDir returns the tickets directory path
+func (p *Parser) GetTicketsDir() string {
+	return filepath.Join(p.dataDir, "tickets")
 }
 
 // EnsureFileExists ensures a file exists with basic structure

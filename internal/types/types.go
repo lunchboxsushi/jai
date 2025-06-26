@@ -46,6 +46,7 @@ const (
 	TicketTypeEpic    TicketType = "epic"
 	TicketTypeTask    TicketType = "task"
 	TicketTypeSubtask TicketType = "subtask"
+	TicketTypeSpike   TicketType = "spike"
 )
 
 // Config represents the application configuration

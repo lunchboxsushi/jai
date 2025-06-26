@@ -20,6 +20,8 @@ var (
 	epicStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#a259ec")).Bold(true)
 	// Tasks: lighter blue for better readability
 	taskStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#3b82f6")).Bold(true)
+	// Spikes: amber for investigation/research work
+	spikeStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#f59e0b")).Bold(true)
 	// Subtasks: light blue (matches screenshot)
 	subtaskStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#60a5fa")).Bold(true)
 	// Description: warm orange for focused, white for others
@@ -98,20 +100,26 @@ func renderEpicCentricView(allTickets []types.Ticket, currentCtx *types.Context,
 func renderTaskCentricView(allTickets []types.Ticket, currentCtx *types.Context, parser *markdown.Parser) error {
 	var focusedTask *types.Ticket
 	for i, t := range allTickets {
-		if t.Key == currentCtx.TaskKey && t.Type == types.TicketTypeTask {
+		if t.Key == currentCtx.TaskKey && (t.Type == types.TicketTypeTask || t.Type == types.TicketTypeSpike) {
 			focusedTask = &allTickets[i]
 			break
 		}
 	}
 
 	if focusedTask == nil {
-		fmt.Printf("Focused task '%s' not found in any markdown file.\n", currentCtx.TaskKey)
+		fmt.Printf("Focused task/spike '%s' not found in any markdown file.\n", currentCtx.TaskKey)
 		return nil
 	}
 
-	// Build a simple tree with the focused task and its subtasks
+	// Build a simple tree with the focused task/spike and its subtasks
 	isTaskFocused := currentCtx.TaskKey == focusedTask.Key && currentCtx.SubtaskKey == ""
-	taskTitle := formatNodeTitle("Task", parser.RemoveJiraKey(focusedTask.Title), focusedTask.Key, isTaskFocused, taskStyle)
+
+	var taskTitle string
+	if focusedTask.Type == types.TicketTypeSpike {
+		taskTitle = formatNodeTitle("Spike", parser.RemoveJiraKey(focusedTask.Title), focusedTask.Key, isTaskFocused, spikeStyle)
+	} else {
+		taskTitle = formatNodeTitle("Task", parser.RemoveJiraKey(focusedTask.Title), focusedTask.Key, isTaskFocused, taskStyle)
+	}
 
 	// Add orphan indicator if no epic
 	if focusedTask.EpicKey == "" {
@@ -121,7 +129,7 @@ func renderTaskCentricView(allTickets []types.Ticket, currentCtx *types.Context,
 	taskTree := treepkg.New().Root(taskTitle)
 	taskTree.Enumerator(treepkg.RoundedEnumerator)
 
-	// Find subtasks for this task
+	// Find subtasks for this task/spike
 	subtasks := findChildSubtasks(focusedTask.Key, allTickets)
 	for _, subtask := range subtasks {
 		isSubtaskFocused := currentCtx.SubtaskKey == subtask.Key
@@ -136,7 +144,7 @@ func renderTaskCentricView(allTickets []types.Ticket, currentCtx *types.Context,
 func findChildTasks(epicKey string, allTickets []types.Ticket) []*types.Ticket {
 	var tasks []*types.Ticket
 	for i, t := range allTickets {
-		if t.Type == types.TicketTypeTask && t.EpicKey == epicKey {
+		if (t.Type == types.TicketTypeTask || t.Type == types.TicketTypeSpike) && t.EpicKey == epicKey {
 			tasks = append(tasks, &allTickets[i])
 		}
 	}
@@ -170,7 +178,14 @@ func buildTree(epic *types.Ticket, tasks []*types.Ticket, allTickets []types.Tic
 
 	for _, task := range tasks {
 		isTaskFocused := focusLevel == "task" && ctx.TaskKey == task.Key
-		taskTitle := formatNodeTitle("Task", parser.RemoveJiraKey(task.Title), task.Key, isTaskFocused, taskStyle)
+
+		var taskTitle string
+		if task.Type == types.TicketTypeSpike {
+			taskTitle = formatNodeTitle("Spike", parser.RemoveJiraKey(task.Title), task.Key, isTaskFocused, spikeStyle)
+		} else {
+			taskTitle = formatNodeTitle("Task", parser.RemoveJiraKey(task.Title), task.Key, isTaskFocused, taskStyle)
+		}
+
 		taskTree := treepkg.New().Root(taskTitle)
 
 		subtasks := findChildSubtasks(task.Key, allTickets)
@@ -194,6 +209,8 @@ func formatNodeTitle(kind, title, key string, isFocused bool, style lipgloss.Sty
 		prefix = epicStyle.Render("Epic")
 	case "Task":
 		prefix = taskStyle.Render("Task")
+	case "Spike":
+		prefix = spikeStyle.Render("Spike")
 	case "Subtask":
 		prefix = subtaskStyle.Render("Subtask")
 	}

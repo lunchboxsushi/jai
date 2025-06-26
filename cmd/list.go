@@ -80,6 +80,8 @@ func runList(cmd *cobra.Command, args []string) error {
 		return listSubtasksOnly(allTickets, ctxManager.Get())
 	case "orphan":
 		return listOrphanTasksOnly(allTickets, ctxManager.Get())
+	case "spike":
+		return listSpikesOnly(allTickets, ctxManager.Get())
 	default:
 		return listAllInTree(allTickets, ctxManager.Get())
 	}
@@ -94,7 +96,7 @@ func listAllInTree(allTickets []types.Ticket, ctx *types.Context) error {
 		switch ticket.Type {
 		case types.TicketTypeEpic:
 			epics = append(epics, ticket)
-		case types.TicketTypeTask:
+		case types.TicketTypeTask, types.TicketTypeSpike:
 			if ticket.EpicKey == "" {
 				orphanTasks = append(orphanTasks, ticket)
 			} else {
@@ -149,10 +151,22 @@ func buildEpicSubtree(epic types.Ticket, allTasks, allSubtasks []types.Ticket, c
 // buildTaskSubtree builds a subtree for a task with its subtasks
 func buildTaskSubtree(task types.Ticket, allSubtasks []types.Ticket, ctx *types.Context) *treepkg.Tree {
 	isTaskFocused := ctx.TaskKey == task.Key && ctx.SubtaskKey == ""
-	taskTitle := formatTicketTitle("Task", task, isTaskFocused)
+
+	// Determine the correct type name for display
+	var typeName string
+	switch task.Type {
+	case types.TicketTypeTask:
+		typeName = "Task"
+	case types.TicketTypeSpike:
+		typeName = "Spike"
+	default:
+		typeName = "Task" // fallback
+	}
+
+	taskTitle := formatTicketTitle(typeName, task, isTaskFocused)
 	taskTree := treepkg.New().Root(taskTitle)
 
-	// Find subtasks for this task
+	// Find subtasks for this task (spikes typically don't have subtasks, but check anyway)
 	for _, subtask := range allSubtasks {
 		if subtask.ParentKey == task.Key {
 			isSubtaskFocused := ctx.SubtaskKey == subtask.Key
@@ -173,6 +187,8 @@ func formatTicketTitle(ticketType string, ticket types.Ticket, isFocused bool) s
 		style = lipgloss.NewStyle().Foreground(lipgloss.Color("#a259ec")).Bold(true)
 	case "Task":
 		style = lipgloss.NewStyle().Foreground(lipgloss.Color("#3b82f6")).Bold(true)
+	case "Spike":
+		style = lipgloss.NewStyle().Foreground(lipgloss.Color("#f59e0b")).Bold(true) // Amber color for spikes
 	case "Subtask":
 		style = lipgloss.NewStyle().Foreground(lipgloss.Color("#60a5fa")).Bold(true)
 	}
@@ -252,6 +268,24 @@ func listSubtasksOnly(allTickets []types.Ticket, ctx *types.Context) error {
 				}
 			}
 			fmt.Println("  " + formatTicketTitle("Subtask", ticket, isFocused) + parentInfo)
+		}
+	}
+	return nil
+}
+
+// listSpikesOnly shows only spikes
+func listSpikesOnly(allTickets []types.Ticket, ctx *types.Context) error {
+	fmt.Println("🔍 Spikes:")
+	for _, ticket := range allTickets {
+		if ticket.Type == types.TicketTypeSpike {
+			isFocused := ctx.TaskKey == ticket.Key // Spikes can be focused like tasks
+			epicInfo := ""
+			if ticket.EpicKey != "" {
+				epicInfo = fmt.Sprintf(" (Epic: %s)", ticket.EpicKey)
+			} else {
+				epicInfo = " (Orphan)"
+			}
+			fmt.Println("  " + formatTicketTitle("Spike", ticket, isFocused) + epicInfo)
 		}
 	}
 	return nil
