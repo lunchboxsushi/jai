@@ -122,7 +122,7 @@ func runTask(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Review before creating if enabled
+	// Review before creating if enabled (after enrichment so user sees processed content)
 	if viper.GetBool("general.review_before_create") && !noCreate {
 		if err := reviewTaskBeforeCreate(task, parser.GetTaskFilePath("")); err != nil {
 			return fmt.Errorf("review failed: %w", err)
@@ -288,6 +288,13 @@ func enrichTask(task *types.Ticket, ctx *types.Context) (*types.EnrichmentRespon
 
 	fmt.Printf("AI Config - Provider: %s, Model: %s, MaxTokens: %d\n",
 		aiConfig.AI.Provider, aiConfig.AI.Model, aiConfig.AI.MaxTokens)
+
+	// Show template configuration for debugging
+	if aiConfig.AI.PromptTemplate != "" {
+		fmt.Printf("Using custom prompt template: %s\n", aiConfig.AI.PromptTemplate)
+	} else {
+		fmt.Printf("Using default prompt template: ~/.jai/templates/enrichment_prompt.txt\n")
+	}
 
 	if aiConfig.AI.APIKey == "" {
 		fmt.Println("ERROR: No AI API key configured (JAI_AI_TOKEN environment variable not set)")

@@ -152,10 +152,13 @@ func (p *OpenAIProvider) buildPrompt(req *types.EnrichmentRequest) string {
 		return p.buildDefaultPrompt(req)
 	}
 
+	// PRE-PROCESS: Evaluate expressions in the raw content first
+	processedRawContent := p.processContentExpressions(req.RawContent, req)
+
 	// Replace template variables
 	prompt := template
 	prompt = strings.ReplaceAll(prompt, "{{TICKET_TYPE}}", string(req.Type))
-	prompt = strings.ReplaceAll(prompt, "{{RAW_CONTENT}}", req.RawContent)
+	prompt = strings.ReplaceAll(prompt, "{{RAW_CONTENT}}", processedRawContent)
 
 	// Build context string
 	contextParts := []string{}
@@ -175,11 +178,15 @@ func (p *OpenAIProvider) buildPrompt(req *types.EnrichmentRequest) string {
 	prompt = strings.ReplaceAll(prompt, "{{CONTEXT}}", contextStr)
 
 	// Extract and populate title if available
-	title := p.extractTitleFromContent(req.RawContent)
+	title := p.extractTitleFromContent(processedRawContent)
 	prompt = strings.ReplaceAll(prompt, "{{TITLE}}", title)
 
-	// Process {{expression}} patterns for AI evaluation
-	prompt = p.processAIExpressions(prompt)
+	fmt.Printf("OpenAI: Prompt before template expression processing:\n%s\n", prompt)
+
+	// Process remaining {{expression}} patterns in the template (not in content)
+	prompt = p.processTemplateExpressions(prompt)
+
+	fmt.Printf("OpenAI: Final prompt after template expression processing:\n%s\n", prompt)
 
 	return prompt
 }
@@ -221,8 +228,43 @@ func (p *OpenAIProvider) loadPromptTemplate() (string, error) {
 	return string(content), nil
 }
 
-// processAIExpressions processes {{expression}} patterns by evaluating them with AI
-func (p *OpenAIProvider) processAIExpressions(prompt string) string {
+// processContentExpressions processes {{expression}} patterns within the raw content
+// with full context preservation
+func (p *OpenAIProvider) processContentExpressions(rawContent string, req *types.EnrichmentRequest) string {
+	// Find all {{expression}} patterns in the raw content
+	re := regexp.MustCompile(`\{\{([^}]+)\}\}`)
+	matches := re.FindAllStringSubmatch(rawContent, -1)
+
+	if len(matches) == 0 {
+		return rawContent // No expressions to process
+	}
+
+	fmt.Printf("OpenAI: Found %d expressions to evaluate in raw content\n", len(matches))
+
+	processedContent := rawContent
+
+	for _, match := range matches {
+		if len(match) >= 2 {
+			fullMatch := match[0]
+			expression := strings.TrimSpace(match[1])
+
+			// Skip template variables (shouldn't be in content, but safety check)
+			if expression == "TICKET_TYPE" || expression == "RAW_CONTENT" ||
+				expression == "CONTEXT" || expression == "TITLE" {
+				continue
+			}
+
+			// Evaluate the expression with full context of the problem
+			result := p.evaluateExpressionWithContext(expression, rawContent, req)
+			processedContent = strings.ReplaceAll(processedContent, fullMatch, result)
+		}
+	}
+
+	return processedContent
+}
+
+// processTemplateExpressions processes {{expression}} patterns in the template (not content)
+func (p *OpenAIProvider) processTemplateExpressions(prompt string) string {
 	// Find all {{expression}} patterns
 	re := regexp.MustCompile(`\{\{([^}]+)\}\}`)
 	matches := re.FindAllStringSubmatch(prompt, -1)
@@ -283,6 +325,72 @@ func (p *OpenAIProvider) evaluateExpression(expression string) string {
 	return result
 }
 
+// evaluateExpressionWithContext evaluates an expression with full context of the problem
+func (p *OpenAIProvider) evaluateExpressionWithContext(expression, rawContent string, req *types.EnrichmentRequest) string {
+	// Build context for the expression evaluation
+	contextParts := []string{}
+
+	// Add ticket type context
+	contextParts = append(contextParts, fmt.Sprintf("This is for a %s ticket.", req.Type))
+
+	// Add epic/task context if available
+	if req.Context.EpicKey != "" {
+		contextParts = append(contextParts, fmt.Sprintf("It's part of epic: %s", req.Context.EpicKey))
+	}
+	if req.Context.TaskKey != "" {
+		contextParts = append(contextParts, fmt.Sprintf("It's related to task: %s", req.Context.TaskKey))
+	}
+
+	// Add the surrounding context from the raw content
+	contextParts = append(contextParts, fmt.Sprintf("The full context is: %s", rawContent))
+
+	contextStr := strings.Join(contextParts, " ")
+
+	// Create a more detailed system prompt for contextual evaluation
+	systemPrompt := `You are a helpful assistant evaluating expressions within the context of technical tasks. 
+The user will provide you with an expression to evaluate, along with the full context of the problem.
+Your response should be contextually appropriate and directly address the expression while considering the surrounding context.
+If asked for a list, provide it in a simple, practical format relevant to the context.`
+
+	userPrompt := fmt.Sprintf(`Please evaluate this expression: "%s"
+
+Context: %s
+
+Provide a direct, practical response that fits naturally within this context.`, expression, contextStr)
+
+	resp, err := p.client.CreateChatCompletion(
+		context.Background(),
+		openai.ChatCompletionRequest{
+			Model: p.config.AI.Model,
+			Messages: []openai.ChatCompletionMessage{
+				{
+					Role:    openai.ChatMessageRoleSystem,
+					Content: systemPrompt,
+				},
+				{
+					Role:    openai.ChatMessageRoleUser,
+					Content: userPrompt,
+				},
+			},
+			MaxTokens:   400, // Allow more tokens for contextual responses
+			Temperature: 0.7,
+		},
+	)
+
+	if err != nil {
+		fmt.Printf("OpenAI: Failed to evaluate expression '%s' with context: %v\n", expression, err)
+		return fmt.Sprintf("[Error evaluating: %s]", expression)
+	}
+
+	if len(resp.Choices) == 0 {
+		return fmt.Sprintf("[No response for: %s]", expression)
+	}
+
+	result := strings.TrimSpace(resp.Choices[0].Message.Content)
+	fmt.Printf("OpenAI: Evaluated expression with context '%s' → '%s'\n", expression, result)
+	return result
+}
+
 // extractTitleFromContent tries to extract a title from the raw content
 func (p *OpenAIProvider) extractTitleFromContent(content string) string {
 	lines := strings.Split(content, "\n")
@@ -326,6 +434,8 @@ func (p *OpenAIProvider) getSystemPrompt() string {
 
 // parseEnrichmentResponse parses the AI response into structured data
 func (p *OpenAIProvider) parseEnrichmentResponse(content string) (*types.EnrichmentResponse, error) {
+	fmt.Printf("OpenAI: Raw AI response to parse:\n%s\n", content)
+
 	// First try to parse as JSON
 	var jsonResp struct {
 		Title       string   `json:"title"`
@@ -341,6 +451,7 @@ func (p *OpenAIProvider) parseEnrichmentResponse(content string) (*types.Enrichm
 
 	if jsonStart != -1 && jsonEnd != -1 && jsonEnd > jsonStart {
 		jsonContent := content[jsonStart : jsonEnd+1]
+		fmt.Printf("OpenAI: Extracted JSON content:\n%s\n", jsonContent)
 
 		if err := json.Unmarshal([]byte(jsonContent), &jsonResp); err == nil {
 			// Successfully parsed JSON
@@ -357,11 +468,15 @@ func (p *OpenAIProvider) parseEnrichmentResponse(content string) (*types.Enrichm
 				resp.Title = p.extractTitleFromDescription(resp.Description)
 			}
 
+			fmt.Printf("OpenAI: Parsed JSON response - Title: %s, Description length: %d\n", resp.Title, len(resp.Description))
 			return resp, nil
+		} else {
+			fmt.Printf("OpenAI: JSON parsing failed: %v\n", err)
 		}
 	}
 
 	// Fallback to line-by-line parsing
+	fmt.Printf("OpenAI: Using fallback parsing\n")
 	return p.parseEnrichmentResponseFallback(content)
 }
 
