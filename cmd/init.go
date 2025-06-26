@@ -152,6 +152,11 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create templates directory: %w", err)
 	}
 
+	// Create default enrichment prompt template
+	if err := createDefaultEnrichmentTemplate(templatesDir); err != nil {
+		fmt.Printf("Warning: Failed to create default enrichment template: %v\n", err)
+	}
+
 	fmt.Println("✅ Configuration created successfully!")
 	fmt.Printf("📁 Config file: %s\n", configPath)
 	fmt.Printf("📁 Data directory: %s\n", dataDir)
@@ -215,4 +220,63 @@ func getDefaultDataDir() string {
 		return ".local/share/jai"
 	}
 	return filepath.Join(home, ".local", "share", "jai")
+}
+
+// createDefaultEnrichmentTemplate creates the default enrichment prompt template
+func createDefaultEnrichmentTemplate(templatesDir string) error {
+	templatePath := filepath.Join(templatesDir, "enrichment_prompt.txt")
+
+	// Don't overwrite existing template
+	if _, err := os.Stat(templatePath); err == nil {
+		fmt.Printf("📝 Enrichment template already exists: %s\n", templatePath)
+		return nil
+	}
+
+	defaultTemplate := `You are a senior technical business analyst helping to transform raw developer tasks into compelling, value-driven Jira tickets for an enterprise SRE/Infrastructure team.
+
+CONTEXT:
+- Tech stack: CDKTF (Terraform IaC), TypeScript/Node.js, Dynatrace, AWS, Golang
+- Audience: Engineering manager and senior developers
+- Goal: Transform technical tasks into business-value-focused tickets that demonstrate developer excellence
+
+INSTRUCTIONS:
+1. PRESERVE all specific details and technical requirements exactly as written
+2. EVALUATE any content within {{double braces}} and replace with actual results
+3. ADD missing business context explaining WHY this work matters
+4. STRUCTURE as formal, detailed ticket with mix of paragraphs and bullet points
+5. FOCUS on business value: cost savings, risk reduction, efficiency gains, reliability improvements
+6. DEMONSTRATE how this change showcases developer excellence and proactive thinking
+
+OUTPUT FORMAT:
+**Business Value & Impact:**
+[Explain the business value and why this matters beyond just technical improvement]
+
+**Problem Statement:**
+[Clear description of what needs to be done, preserving all original technical details]
+
+**Acceptance Criteria:**
+- [Specific, measurable criteria for completion]
+- [Include any technical specifications from original]
+- [Add business success metrics where relevant]
+
+**Technical Context:**
+[Brief technical background if needed for stakeholder understanding]
+
+TONE: Professional, value-focused, demonstrating technical leadership and business awareness.
+
+Remember: Transform the raw technical task into a compelling business case while preserving every technical detail.
+
+---
+
+TICKET TYPE: {{TICKET_TYPE}}
+TITLE: {{TITLE}}
+RAW CONTENT: {{RAW_CONTENT}}
+CURRENT CONTEXT: {{CONTEXT}}`
+
+	if err := os.WriteFile(templatePath, []byte(defaultTemplate), 0644); err != nil {
+		return fmt.Errorf("failed to write template file: %w", err)
+	}
+
+	fmt.Printf("📝 Created default enrichment template: %s\n", templatePath)
+	return nil
 }

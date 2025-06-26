@@ -60,10 +60,11 @@ type Config struct {
 	} `yaml:"jira" json:"jira"`
 
 	AI struct {
-		Provider  string `yaml:"provider" json:"provider"` // "openai", "anthropic", etc.
-		APIKey    string `yaml:"api_key" json:"api_key"`
-		Model     string `yaml:"model" json:"model"`
-		MaxTokens int    `yaml:"max_tokens" json:"max_tokens"`
+		Provider       string `yaml:"provider" json:"provider"` // "openai", "anthropic", etc.
+		APIKey         string `yaml:"api_key" json:"api_key"`
+		Model          string `yaml:"model" json:"model"`
+		MaxTokens      int    `yaml:"max_tokens" json:"max_tokens"`
+		PromptTemplate string `yaml:"prompt_template" json:"prompt_template"` // Path to custom prompt template file
 	} `yaml:"ai" json:"ai"`
 
 	General struct {

@@ -199,15 +199,17 @@ func testAIEnrichment() error {
 	// Get AI config
 	aiConfig := &types.Config{
 		AI: struct {
-			Provider  string `yaml:"provider" json:"provider"`
-			APIKey    string `yaml:"api_key" json:"api_key"`
-			Model     string `yaml:"model" json:"model"`
-			MaxTokens int    `yaml:"max_tokens" json:"max_tokens"`
+			Provider       string `yaml:"provider" json:"provider"`
+			APIKey         string `yaml:"api_key" json:"api_key"`
+			Model          string `yaml:"model" json:"model"`
+			MaxTokens      int    `yaml:"max_tokens" json:"max_tokens"`
+			PromptTemplate string `yaml:"prompt_template" json:"prompt_template"`
 		}{
-			Provider:  viper.GetString("ai.provider"),
-			APIKey:    os.Getenv("JAI_AI_TOKEN"),
-			Model:     viper.GetString("ai.model"),
-			MaxTokens: viper.GetInt("ai.max_tokens"),
+			Provider:       viper.GetString("ai.provider"),
+			APIKey:         os.Getenv("JAI_AI_TOKEN"),
+			Model:          viper.GetString("ai.model"),
+			MaxTokens:      viper.GetInt("ai.max_tokens"),
+			PromptTemplate: viper.GetString("ai.prompt_template"),
 		},
 	}
 

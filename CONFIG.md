@@ -49,6 +49,7 @@ ai:
   provider: "openai"                  # AI provider: "openai", "anthropic", etc.
   model: "gpt-3.5-turbo"             # Model to use for enrichment
   max_tokens: 500                     # Maximum tokens for AI responses
+  prompt_template: "templates/enrichment_prompt.txt"  # Path to custom prompt template (optional)
   # Note: api_key is NOT stored here - use JAI_AI_TOKEN environment variable
 
 # General Settings
@@ -90,6 +91,7 @@ export JAI_JIRA_TOKEN="ATATT3xFfGF0..."  # Get from https://id.atlassian.com/man
 | `ai.provider` | string | No | "openai" | AI provider to use |
 | `ai.model` | string | No | "gpt-3.5-turbo" | Model to use for enrichment |
 | `ai.max_tokens` | integer | No | 500 | Maximum tokens for AI responses |
+| `ai.prompt_template` | string | No | "templates/enrichment_prompt.txt" | Path to custom prompt template file |
 | `ai.api_key` | **environment only** | Yes | - | API key for the AI provider (via `JAI_AI_TOKEN`) |
 
 **Example:**

@@ -110,11 +110,16 @@ jai status
 
 - `focus <query>` - Set current context by fuzzy-matching an epic, task, or subtask title or key.
 - `status` - Show the current focused epic, task, and subtask.
+- `open [level]` - Open the current focus item (or specified level) in Jira browser.
 
 ### Configuration
 
 - `config init` - Initialize a new configuration file.
 - `config show` - Show the current configuration.
+
+### Import & Export
+
+- `import <ticket-id>` - Import a Jira ticket and its hierarchy (parents/children) as markdown files.
 
 ## 🗂️ Project Structure
 
@@ -256,6 +261,7 @@ ai:
   api_key: "your-openai-api-key"
   model: "gpt-3.5-turbo"
   max_tokens: 500
+  prompt_template: "templates/enrichment_prompt.txt"  # Path to custom prompt template
 
 general:
   data_dir: "~/.local/share/jai"
@@ -336,4 +342,27 @@ jira:
   epic_link_field: customfield_XXXXX  # Replace XXXXX with your field ID
 ```
 
-This is required for tasks to be properly linked to epics in Jira. If not set, you may see errors or tasks may not be linked to epics. 
+This is required for tasks to be properly linked to epics in Jira. If not set, you may see errors or tasks may not be linked to epics.
+
+### Customizing AI Enrichment
+
+JAI allows you to customize the AI enrichment prompts to match your team's needs:
+
+1. **Default Template**: JAI creates a default prompt template at `~/.jai/templates/enrichment_prompt.txt`
+2. **Template Variables**: Use `{{TICKET_TYPE}}`, `{{TITLE}}`, `{{RAW_CONTENT}}`, `{{CONTEXT}}` in your templates
+3. **AI Expressions**: Use `{{expression}}` to have AI evaluate sub-queries (e.g., `{{give me 5 examples of infrastructure risks}}`)
+4. **Custom Templates**: Set `ai.prompt_template` in your config to use a custom template file
+
+**AI Expression Evaluation:**
+AI expressions within `{{double braces}}` are evaluated separately and replaced with actual generated content, ensuring specific requests are fulfilled rather than just rephrased.
+
+**Example custom expression in template:**
+```
+**Risk Assessment:**
+{{What are the top 3 infrastructure risks for this type of change?}}
+
+**Dependencies:**
+{{List potential system dependencies for this task}}
+```
+
+The AI will evaluate these expressions and replace them with actual content. 
